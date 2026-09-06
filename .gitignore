@@ -1,0 +1,17 @@
+.edgeprofile/
+dom.txt
+tools_smoke_app.html
+preview.png
+# 临时/调试产物
+_shot.png
+_t.html
+_smoke.html
+_dom.html
+_missing.txt
+_words_now.txt
+_tt/
+_tts_tmp/
+audio/_demo/
+# 旧版词表备份（words.js 已含全部词条）
+data/words.bak.js
+data/words.bak2.js
