@@ -20,6 +20,7 @@ ket-park/
 ├── data/
 │   ├── words.js        ← 词库（2209 词，按难度分 18 个月）
 │   ├── readers_easy.js ← 入门读物 L1-L3（30 篇）
+│   ├── readers_more.js ← 进阶读物 L4-L6（30 篇）
 │   └── readers.js      ← 经典读物 L4-L6（30 篇）
 ├── audio/
 │   ├── words/          ← 单词音频，m1-m18.mp3 + index.json（Ana 美音）

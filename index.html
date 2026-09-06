@@ -229,6 +229,7 @@ input,textarea{font-family:inherit;font-size:16px;color:var(--text)}
 
 <script src="data/words.js"></script>
 <script src="data/readers_easy.js"></script>
+<script src="data/readers_more.js"></script>
 <script src="data/readers.js"></script>
 <script>
 /* =========================================================
@@ -351,8 +352,9 @@ const W=window.WORDS||{};
    L1≈31词 L2≈45词 L3≈62词 L4≈63词 L5≈81词 L6≈104词 */
 const R=(function(){
  var e=(window.READERS_EASY||[]).slice();
+ var m=(window.READERS_MORE||[]).slice();
  var c=(window.READERS||[]).map(function(x){return Object.assign({},x,{lv:Math.min(6,x.lv+3)});});
- return e.concat(c);
+ return e.concat(m,c);
 })();
 function mWords(m){return W[m]||[];}
 function wid(m,i){return m+'-'+i;}

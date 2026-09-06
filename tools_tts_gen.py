@@ -141,6 +141,17 @@ async def main():
         print(f'读物 {len(tasks)} 篇，音色 {voice}')
         await run(tasks, f'读物-{vkey}')
 
+    if mode in ('more',):
+        """进阶读物 L4-L6（data/readers_more.js），ana + libby + maisie 各生成一遍"""
+        more = load_js(os.path.join(BASE, 'data', 'readers_more.js'), 'READERS_MORE')
+        for vk in ('ana', 'libby', 'maisie'):
+            v, rt, pc = VOICES[vk]
+            tasks = [(v, rt, pc,
+                      r['text'].replace('\\n', ' ').replace('\n', ' '),
+                      f'readers/{vk}/r{r["id"]}') for r in more]
+            print(f'进阶读物 L4-L6 共 {len(tasks)} 篇，音色 {v}')
+            await run(tasks, f'进阶-{vk}')
+
     if mode in ('easy',):
         """入门读物 L1-L3（data/readers_easy.js），ana + libby + maisie 各生成一遍"""
         easy = load_js(os.path.join(BASE, 'data', 'readers_easy.js'), 'READERS_EASY')
