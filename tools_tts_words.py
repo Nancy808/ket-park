@@ -93,7 +93,7 @@ async def build_month(month, words, tmpdir):
         if not os.path.exists(p) or os.path.getsize(p) < 400:
             continue
         d = probe(p)
-        idx[w['w']] = [round(cur, 3), round(d, 3)]
+        idx[w['w'].lower()] = [round(cur, 3), round(d, 3)]
         parts.append(p)
         cur += d + GAP_MS / 1000
         gp = os.path.join(tmpdir, f'g{i:04d}.mp3')

@@ -471,7 +471,8 @@ function loadWIdx(cb){
  WIDXing=true;
  fetch('audio/words/'+vd+'index.json').then(r=>r.ok?r.json():null).then(j=>{
   WIDX={};WIDXV=vd;
-  if(j)Object.keys(j).forEach(m=>{const o=j[m];Object.keys(o).forEach(w=>{WIDX[w]=[o[w][0],o[w][1],m];});});
+  /* 统一转小写：索引里 Monday/August/T-shirt 等保留了大写，播放时按小写查，不转会 miss */
+  if(j)Object.keys(j).forEach(m=>{const o=j[m];Object.keys(o).forEach(w=>{WIDX[w.toLowerCase()]=[o[w][0],o[w][1],m];});});
   WIDXing=false;if(cb)cb();
  }).catch(()=>{WIDX={};WIDXing=false;if(cb)cb();});
 }
