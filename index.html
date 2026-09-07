@@ -228,6 +228,7 @@ input,textarea{font-family:inherit;font-size:16px;color:var(--text)}
 <div id="toast"></div>
 
 <script src="data/words.js"></script>
+<script src="data/emoji.js"></script>
 <script src="data/readers_easy.js"></script>
 <script src="data/readers_more.js"></script>
 <script src="data/readers.js"></script>
@@ -556,6 +557,72 @@ function stopRec(){return new Promise(res=>{if(!rec){res(null);return;}
   if(rec.stream)rec.stream.getTracks().forEach(t=>t.stop());
   recBlob=b;res(b);};rec.stop();});}
 function audioTag(b){return '<audio controls src="'+URL.createObjectURL(b)+'" style="width:100%;margin-top:10px"></audio>';}
+/* 录音分析：时长 / 平均音量(dB) / 有声帧占比 —— 用于跟读评分 */
+function analyzeRec(blob){
+ return new Promise(res=>{
+  try{
+   const AC=window.AudioContext||window.webkitAudioContext;
+   if(!AC||!blob){res(null);return;}
+   const ac=new AC(),fr=new FileReader();
+   fr.onload=()=>{
+    ac.decodeAudioData(fr.result,buf=>{
+     try{
+      const ch=buf.getChannelData(0),sr=buf.sampleRate,step=Math.max(1,Math.floor(sr*0.05));
+      let sum=0,n=0,voiced=0;
+      for(let i=0;i<ch.length;i+=step){
+       let s=0,c=0;
+       for(let j=i;j<Math.min(i+step,ch.length);j++){s+=ch[j]*ch[j];c++;}
+       if(!c)break;
+       const rms=Math.sqrt(s/c);sum+=rms;n++;
+       if(rms>0.02)voiced++;
+      }
+      const avg=n?sum/n:0;
+      res({dur:buf.duration,db:avg>0?20*Math.log10(avg):-60,voiced:n?voiced/n:0});
+     }catch(e){res(null);}
+    },()=>res(null));
+   };
+   fr.onerror=()=>res(null);
+   fr.readAsArrayBuffer(blob);
+  }catch(e){res(null);}
+ });
+}
+/* 跟读评分（0-100）：响度 15 + 时长 15 + 开口率 12 + 练习遍数 6，基准 55 */
+function scoreRead(an,words,times){
+ const std=Math.max(6,words/2.2);            // 参考时长：约 2.2 词/秒
+ let s=55,tips=[];
+ if(!an)return {score:80,tips:['这次没能分析音量，先按完成记录啦'],std:std,dur:0};
+ const ratio=an.dur/std;
+ if(an.db>-25)s+=15;
+ else if(an.db>-32)s+=10;
+ else if(an.db>-40){s+=5;tips.push('再大声一点，让房间另一头也听得见');}
+ else{s+=2;tips.push('声音有点小，深吸一口气，把每个词都送出来');}
+ if(ratio>=0.6&&ratio<=2.2)s+=15;
+ else if(ratio>2.2&&ratio<=3.2){s+=9;tips.push('读得有点慢，试着一句一句连贯下来');}
+ else if(ratio>=0.4&&ratio<0.6){s+=9;tips.push('读得有点赶，把每个词的音咬清楚');}
+ else if(ratio>3.2){s+=5;tips.push('中间停得有点久，可以先多听两遍示范');}
+ else{s+=4;tips.push('好像只读了一小段，要读完整篇哦');}
+ if(an.voiced>=0.65)s+=12;
+ else if(an.voiced>=0.45)s+=8;
+ else{s+=3;tips.push('中间空白比较多，试着一口气读完一句话');}
+ if(times>=3)s+=6;else if(times===2)s+=4;
+ /* 硬伤钳制：没读完 / 大片空白 / 声音太小，分数必须上不去，
+    否则「嗓门大但只念了三个词」也能拿高分，评分就没意义了 */
+ if(ratio<0.4){s=Math.min(s,64);if(tips.indexOf('这篇好像还没读完，要读到最后一个词哦')<0)tips.unshift('这篇好像还没读完，要读到最后一个词哦');}
+ else if(ratio<0.6)s=Math.min(s,78);
+ else if(ratio>3.2)s=Math.min(s,76);
+ if(an.voiced<0.3)s=Math.min(s,72);
+ else if(an.voiced<0.45)s=Math.min(s,84);
+ if(an.db<-45)s=Math.min(s,74);
+ else if(an.db<-38)s=Math.min(s,85);
+ return {score:Math.max(45,Math.min(100,s)),tips:tips,std:std,dur:an.dur};
+}
+function readGrade(s){
+ if(s>=92)return {e:'🏆',t:'完美朗读',d:'声音响亮、节奏自然，可以当小老师啦'};
+ if(s>=82)return {e:'🎉',t:'读得很棒',d:'清楚又流畅，继续保持'};
+ if(s>=72)return {e:'💪',t:'不错',d:'整体完成得很好，还有小地方可以更好'};
+ if(s>=62)return {e:'🌱',t:'继续加油',d:'勇敢开口就是进步，再练一遍会更好'};
+ return {e:'🤗',t:'再试一次',d:'别急，先多听两遍示范再读'};
+}
 
 /* ---------- SM-2 ---------- */
 function wr(id){if(!st.words[id])st.words[id]={ef:2.5,iv:0,reps:0,due:today(),wrong:0,intro:false,seen:0};return st.words[id];}
@@ -895,42 +962,131 @@ function ovClose(){clearInterval(ovTimer);try{speechSynthesis.cancel();}catch(e)
 
 /* ---------- ① 背词 ---------- */
 let vc={ids:[],i:0,mode:'card',showAns:false,correct:0,total:0,wrong:[],round:0,dic:{list:[],i:0,ok:0}};
+/* REV = 回看模式：已完成的环节再点进来只读，不重复计分/不改复习计划 */
+let REV=false,vr={ids:[],i:0};
 function taskVocab(){
  const q=todayQueue();
- vc={ids:shuffle(q.newIds).concat(shuffle(q.revIds)),i:0,mode:'card',showAns:false,correct:0,total:0,wrong:[],round:0,dic:{list:[],i:0,ok:0}};
+ if(REV){vocabReview(q);return;}
+ vc={ids:shuffle(q.newIds).concat(shuffle(q.revIds)),i:0,mode:'quiz',cur:null,correct:0,total:0,wrong:[],round:0,combo:0,maxCombo:0,dic:{list:[],i:0,ok:0}};
  if(!vc.ids.length){ov('背词','<div class="empty">今天的词都学完啦，明天见 🌟</div>','');return;}
  ov('① 背词','','',10);vocabCard();
 }
+/* ---- 回看：今天背过的词，翻卡复习，不计分 ---- */
+function vocabReview(q){
+ const ids=(q.newIds||[]).concat(q.revIds||[]);
+ if(!ids.length){ov('① 背词 · 回看','<div class="empty">今天还没有背词记录</div>','');return;}
+ vr={ids:ids,i:0};ov('① 背词 · 回看','','',0);vocabReviewCard();
+}
+function vocabReviewCard(){
+ if(vr.i>=vr.ids.length){
+  ovBodySet('<div class="wcard"><div style="font-size:46px">📚</div>'+
+   '<div style="font-size:19px;font-weight:800;margin-top:6px">'+vr.ids.length+' 个词都看完啦</div>'+
+   '<div class="tiny muted" style="margin-top:6px">回看不计分，放心翻</div>'+
+   '<button class="btn block" style="margin-top:18px" data-act="revExit">返回今日</button></div>');return;}
+ const id=vr.ids[vr.i],w=wById(id);if(!w){vr.i++;return vocabReviewCard();}
+ const r=st.words[id]||{};
+ let h='<div class="tiny muted" style="text-align:center;margin-bottom:10px">回看 '+(vr.i+1)+' / '+vr.ids.length+' · 已记 '+((r&&r.lv)||0)+' 次</div>';
+ h+='<div class="wcard"><div class="w" style="font-size:30px">'+esc(w.w)+'</div>'+
+  (w.ip?'<div class="ipa">'+esc(w.ip)+'</div>':'')+(w.p?'<div class="pos">'+esc(w.p)+'</div>':'')+
+  '<button class="spk" data-act="spk" data-t="'+esc(w.w)+'">🔊</button>'+
+  '<div class="cn" style="margin-top:8px">'+esc(w.cn||'')+'</div>'+
+  (w.ex?'<div class="ex" style="margin-top:10px">'+esc(w.ex)+'<div class="exc">'+(w.ec||'')+'</div></div>':'')+'</div>';
+ h+='<div class="answers">'+
+  (vr.i>0?'<button class="btn o" data-act="vrPrev">← 上一个</button>':'<button class="btn o" data-act="revExit">返回今日</button>')+
+  '<button class="yes" data-act="vrNext">'+(vr.i+1>=vr.ids.length?'看完了 ✓':'下一个 →')+'</button></div>';
+ ovBodySet(h);say(w.w,0.85,{kind:'word',key:w.w});
+}
+/* ---- 百词斩式：每词随机出一种题型（看图 / 听音 / 中译英 / 例句填空），4 选 1 ---- */
 function vocabCard(){
- if(vc.i>=vc.ids.length){const acc=vc.total?vc.correct/vc.total:1;
-  if(acc<0.6&&vc.round===0&&vc.wrong.length){vc.round=1;vc.ids=shuffle(vc.wrong);vc.wrong=[];vc.i=0;vc.total=0;vc.correct=0;
-   ovBodySet('<div class="wcard"><div style="font-size:44px">🔁</div><div style="font-size:19px;font-weight:800;margin-top:6px">这几个再来一遍</div>'+
-    '<div class="tiny muted" style="margin-top:6px">正确率还不到 60%，先把它们拿下</div><button class="btn block" style="margin-top:16px" data-act="vcNext">开始</button></div>');return;}
-  startDictation();return;}
+ if(vc.i>=vc.ids.length){vocabSettle();return;}
  const id=vc.ids[vc.i];const w=wById(id);if(!w){vc.i++;return vocabCard();}
- const isNew=!st.words[id]||!st.words[id].intro;
- let h='<div class="tiny muted" style="text-align:center;margin-bottom:10px">第 '+(vc.i+1)+' / '+vc.ids.length+' · '+(isNew?'新词':'复习')+'</div>';
- h+='<div class="wcard">';
- if(!vc.showAns){
-  h+='<div class="w">'+esc(w.w)+'</div>'+(w.ip?'<div class="ipa">'+esc(w.ip)+'</div>':'')+
-   (w.p?'<div class="pos">'+esc(w.p)+'</div>':'')+
-   '<button class="spk" data-act="spk" data-t="'+esc(w.w)+'">🔊</button>'+
-   '<div class="tiny muted" style="margin-top:6px">想一想中文意思</div>';
+ vc.cur=makeQ(id,w);vc.cur.answered=false;renderQ();
+}
+function makeQ(id,w){
+ const E=window.EMOJI||{};const em=E[String(w.w).toLowerCase()]||'';
+ const cand=[];if(em)cand.push('pic');cand.push('sound','cn');
+ if(w.ex&&w.ex.length>8)cand.push('ex');
+ const t=cand[Math.floor(Math.random()*cand.length)];
+ const opts=shuffle(makeOpts(id,w));
+ return {id:id,w:w,t:t,em:em,opts:opts,ans:opts.indexOf(w.w),answered:false};
+}
+function makeOpts(id,w,t){
+ const m=+String(id).split('-')[0];const pool=mWords(m)||[];
+ const out=[w.w];let guard=0;
+ while(out.length<4&&guard++<300){
+  const r=pool[Math.floor(Math.random()*pool.length)];
+  if(!r||!r.w)continue;
+  const lw=String(r.w).toLowerCase();
+  if(out.indexOf(r.w)>=0||lw===String(w.w).toLowerCase())continue;
+  if(Math.abs(r.w.length-w.w.length)>6)continue;   // 长度差太大一眼就看出来，排除
+  out.push(r.w);
+ }
+ while(out.length<4)out.push('word'+out.length);
+ return out;
+}
+function renderQ(){
+ const c=vc.cur;if(!c)return;const w=c.w;
+ const isNew=!st.words[c.id]||!st.words[c.id].intro;
+ let h='<div class="spread" style="margin-bottom:8px">'+
+  '<span class="tiny muted">第 '+(vc.i+1)+' / '+vc.ids.length+' · '+(isNew?'新词':'复习')+'</span>'+
+  (vc.combo>=2?'<span class="pill p">🔥 连对 '+vc.combo+'</span>':'')+'</div>';
+ h+='<div class="wcard" style="text-align:center;padding:22px 16px">';
+ if(c.t==='pic'){
+  h+='<div style="font-size:78px;line-height:1.1">'+c.em+'</div>'+
+   '<div class="tiny muted" style="margin-top:8px">这是什么？选出英文单词</div>';
+ }else if(c.t==='sound'){
+  h+='<div style="font-size:52px">🔊</div>'+
+   '<button class="btn o sm" data-act="spk" data-t="'+esc(w.w)+'" style="margin-top:10px">▶️ 再听一次</button>'+
+   '<div class="tiny muted" style="margin-top:8px">听一听，是哪个词？</div>';
+ }else if(c.t==='cn'){
+  h+='<div style="font-size:32px;font-weight:800;line-height:1.3">'+esc(w.cn||'')+'</div>'+
+   '<div class="tiny muted" style="margin-top:10px">选出对应的英文</div>';
  }else{
-  h+='<div class="w" style="font-size:30px">'+esc(w.w)+'</div>'+
-   (w.ip?'<div class="ipa">'+esc(w.ip)+'</div>':'')+
-   '<button class="spk" data-act="spk" data-t="'+esc(w.w)+'">🔊</button>'+
-   '<div class="cn" style="margin-top:8px">'+esc(w.cn||'')+'</div>'+
-   (w.ex?'<div class="ex" style="margin-top:10px">'+esc(w.ex)+'<div class="exc">'+(w.ec||'')+'</div></div>':'');
+  let ex=String(w.ex||'');
+  try{ex=ex.replace(new RegExp('\\b'+w.w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\b','i'),'____');}catch(e){}
+  h+='<div class="ex" style="font-size:17px;line-height:1.6">'+esc(ex)+'</div>'+
+   '<div class="exc">'+(w.ec||'')+'</div>'+
+   '<div class="tiny muted" style="margin-top:8px">选词填空</div>';
+ }
+ h+='</div><div style="display:flex;flex-direction:column;gap:9px;margin-top:12px">';
+ c.opts.forEach((o,i)=>{h+='<button class="opt" data-act="vqPick" data-i="'+i+'" style="font-size:19px;padding:14px;text-align:center">'+esc(o)+'</button>';});
+ h+='</div>';
+ ovBodySet(h);
+ if(c.t==='sound')setTimeout(()=>say(w.w,0.8,{kind:'word',key:w.w}),280);
+}
+/* 答完一题：先给结果 + 完整词条，再进下一题 */
+function vocabAnsCard(ok,c){
+ const w=c.w;
+ let h='<div class="wcard" style="text-align:center">'+
+  '<div style="font-size:36px">'+(ok?'✅':'💡')+'</div>'+
+  '<div class="w" style="font-size:28px;margin-top:4px">'+esc(w.w)+'</div>'+
+  (w.ip?'<div class="ipa">'+esc(w.ip)+'</div>':'')+(w.p?'<div class="pos">'+esc(w.p)+'</div>':'')+
+  '<button class="spk" data-act="spk" data-t="'+esc(w.w)+'">🔊</button>'+
+  '<div class="cn" style="margin-top:8px">'+esc(w.cn||'')+'</div>'+
+  (w.ex?'<div class="ex" style="margin-top:10px">'+esc(w.ex)+'<div class="exc">'+(w.ec||'')+'</div></div>':'')+
+  '</div><button class="btn block" style="margin-top:14px" data-act="vqNext">'+
+  (vc.i+1>=vc.ids.length?'看战绩 →':'下一个 →')+'</button>';
+ ovBodySet(h);say(w.w,0.8,{kind:'word',key:w.w});
+}
+/* 一轮结束：给战绩 + 星星 */
+function vocabSettle(){
+ const acc=vc.total?vc.correct/vc.total:1;
+ const stars=acc>=0.9?3:(acc>=0.7?2:1);
+ const star='⭐'.repeat(stars)+'☆'.repeat(3-stars);
+ let h='<div class="wcard" style="text-align:center">'+
+  '<div style="font-size:34px;letter-spacing:3px">'+star+'</div>'+
+  '<div style="font-size:21px;font-weight:800;margin-top:8px">答对 '+vc.correct+' / '+vc.total+'</div>'+
+  '<div class="tiny muted" style="margin-top:6px">最高连对 '+(vc.maxCombo||0)+' 个'+
+   ((vc.maxCombo||0)>=5?' · 太厉害了！':((vc.maxCombo||0)>=3?' · 状态不错':' · 明天继续'))+'</div>';
+ if(acc<0.6&&vc.round===0&&vc.wrong.length){
+  h+='<div class="tiny muted" style="margin-top:10px">有几个还没拿下，再来一遍就熟了</div>'+
+   '<button class="btn block" style="margin-top:16px" data-act="vcRetry">🔁 再来一遍（'+vc.wrong.length+' 个）</button>'+
+   '<button class="btn o block sm" style="margin-top:8px" data-act="vcGoDic">直接进入听写</button>';
+ }else{
+  h+='<button class="btn block" style="margin-top:18px" data-act="vcGoDic">进入听写 ✍️</button>';
  }
  h+='</div>';
- if(!vc.showAns){
-  h+='<div class="answers"><button class="yes" data-act="vcAns" data-v="1">✅ 我认识</button><button class="no" data-act="vcAns" data-v="0">❌ 不认识</button></div>';
- }else{
-  h+='<div class="answers"><button class="no" data-act="vcNext">👀 没记住，再来</button><button class="yes" data-act="vcNext">✌️ 记住了</button></div>';
- }
- ovBodySet(h);
- if(!vc.showAns)say(w.w,0.85,{kind:'word',key:w.w});
+ ovBodySet(h);if(stars===3)confetti(30);
 }
 function startDictation(){
  const q=todayQueue();const pool=shuffle(q.newIds.concat(q.revIds)).slice(0,Math.min(5,Math.max(3,Math.ceil(vc.ids.length/3))));
@@ -966,8 +1122,8 @@ function finishVocab(){
 let rd={text:null,recording:false,blob:null,secs:0};
 function taskRead(){
  const r=todayReader();if(!r){ov('② 跟读','<div class="empty">读物内容加载中</div>','');return;}
- rd={r:r,recording:false,blob:null,secs:0};
- ov('② 跟读','','',10);readStep();
+ rd={r:r,recording:false,blob:null,secs:0,times:0,score:null,analyzing:false,sc:null};
+ ov('② 跟读'+(REV?' · 回看':''),'','',10);readStep();
 }
 function readStep(){
  const r=rd.r;
@@ -978,13 +1134,50 @@ function readStep(){
   '<button class="btn o sm" data-act="playFull">🔊 整篇朗读</button>'+
   '<button class="btn o sm" data-act="playSlow">🐢 慢速 0.7×</button>'+
   '<button class="btn o sm" data-act="playFast">🐇 常速 1.0×</button></div>';
+ if(REV){readReview(r,h);return;}
+ const wc=r.text.split(/\s+/).length;
  h+='<div class="card" style="margin-top:14px;text-align:center">'+
-  '<div class="tiny muted" style="margin-bottom:8px">1) 先听 2 遍 → 2) 点录音，大声跟读 → 3) 回放听自己的声音</div>'+
-  '<button class="rec '+(rd.recording?'on':'')+'" data-act="rec">'+(rd.recording?'■':'🎤')+'</button>'+
-  '<div id="recInfo" class="tiny muted" style="margin-top:10px">'+(rd.blob?'已录 '+rd.secs+' 秒 · 可以回放':'还没录音')+'</div>'+
-  (rd.blob?audioTag(rd.blob):'')+
-  (rd.blob?'<button class="btn block" style="margin-top:12px" data-act="readDone">我读完了 ✓</button>':'')+
-  '</div>';
+  '<div class="tiny muted" style="margin-bottom:8px">1) 先听 2 遍 → 2) 点录音，大声跟读 → 3) 看评分，回放听自己</div>'+
+  '<button class="rec '+(rd.recording?'on':'')+'" data-act="rec">'+(rd.recording?'■':'🎤')+'</button>';
+ if(rd.recording){h+='<div class="tiny muted" style="margin-top:10px">录音中…读完再点一次 ■</div>';}
+ else if(rd.analyzing){h+='<div class="tiny muted" style="margin-top:10px">正在评分…</div>';}
+ else if(rd.blob&&rd.score!=null){
+  const g=readGrade(rd.score),sr=rd.sc||{};
+  h+='<div style="margin-top:12px"><div style="font-size:38px">'+g.e+'</div>'+
+   '<div style="font-size:26px;font-weight:800;margin-top:2px">'+rd.score+' <span style="font-size:15px;color:var(--muted)">分</span></div>'+
+   '<div style="font-weight:700;margin-top:2px">'+g.t+'</div>'+
+   '<div class="tiny muted" style="margin-top:4px">'+g.d+'</div>'+
+   '<div class="tiny muted" style="margin-top:8px">读了 '+Math.round(sr.dur||rd.secs||0)+' 秒 · 参考 '+
+    Math.round((sr.std||Math.max(6,wc/2.2)))+' 秒 · 第 '+(rd.times||1)+' 遍</div>'+
+   ((sr.tips&&sr.tips.length)?'<div style="margin-top:10px;text-align:left;background:#FFF3EC;border-radius:12px;padding:11px">'+
+    '<b style="font-size:14px">下次可以更好：</b>'+sr.tips.map(t=>'<div class="tiny" style="margin-top:4px">· '+esc(t)+'</div>').join('')+'</div>':'')+
+   '</div>'+audioTag(rd.blob)+
+   '<div class="row" style="margin-top:12px;gap:8px">'+
+   '<button class="btn o" style="flex:1" data-act="rec">🎤 再读一遍</button>'+
+   '<button class="btn" style="flex:1" data-act="readDone">我读完了 ✓</button></div>';
+ }
+ else{h+='<div id="recInfo" class="tiny muted" style="margin-top:10px">还没录音</div>';}
+ h+='</div>';
+ ovBodySet(h);
+}
+/* ---- 回看：看原文 + 重听 + 看理解题答案 + 上次得分，不重新录音 ---- */
+function readReview(r,head){
+ const d=getDay(),tr=(d.tasks&&d.tasks.read)||{};
+ let h=head;
+ if(tr.score!=null){
+  const g=readGrade(tr.score);
+  h+='<div class="card" style="margin-top:14px;text-align:center">'+
+   '<div style="font-size:40px">'+g.e+'</div>'+
+   '<div style="font-size:22px;font-weight:800;margin-top:4px">'+tr.score+' 分</div>'+
+   '<div class="tiny muted" style="margin-top:4px">'+g.t+' · '+g.d+'</div>'+
+   (tr.times?'<div class="tiny muted" style="margin-top:6px">今天读了 '+tr.times+' 遍</div>':'')+'</div>';
+ }
+ h+='<div class="sec-t">理解题 · 答案</div>';
+ (r.q||[]).forEach((q,i)=>{
+  h+='<div class="card"><div style="font-weight:700;margin-bottom:8px">'+(i+1)+'. '+esc(q.q)+'</div>'+
+   q.o.map((o,oi)=>'<div class="opt '+(oi===q.a?'ok':'')+'" style="cursor:default">'+esc(o)+(oi===q.a?' ✓':'')+'</div>').join('')+'</div>';
+ });
+ h+='<button class="btn block" style="margin-top:14px" data-act="revExit">返回今日</button>';
  ovBodySet(h);
 }
 function taskListen(){
@@ -1001,16 +1194,43 @@ function taskListen(){
   shuffle(q.o.map((o,oi)=>({o:o,ok:oi===q.a}))).map(o=>'<button class="opt" data-act="lq" data-q="'+i+'" data-ok="'+(o.ok?1:0)+'">'+esc(o.o)+'</button>').join('')+'</div>';});
  h+='<div id="lResult"></div>';
  window._lq={qs:qs,ans:{}};
- ov('③ 听力',h,'',5);
+ ov('③ 听力'+(REV?' · 回看':''),h,'',5);
+ if(REV)listenReview(qs);
+}
+/* ---- 回看：直接给出今天 2 题的答案 ---- */
+function listenReview(qs){
+ const el=document.getElementById('lText');if(el)el.style.display='block';
+ let rh='<div class="card" style="text-align:center"><b>今天这 '+qs.length+' 题的正确答案</b>'+
+  '<div class="tiny muted" style="margin-top:6px">回看不计分，明天会换新题</div></div>';
+ qs.forEach((q,i)=>{rh+='<div class="card"><div style="font-weight:700;margin-bottom:8px">'+(i+1)+'. '+esc(q.q)+'</div>'+
+  '<div class="opt ok" style="cursor:default">'+esc(q.o[q.a])+' ✓</div></div>';});
+ rh+='<button class="btn block" style="margin-top:10px" data-act="revExit">返回今日</button>';
+ const box=document.getElementById('lResult');if(box)box.innerHTML=rh;
 }
 
 /* ---------- ④ 说 + 写 ---------- */
 let dr={blob:null,secs:0,recording:false};
 function taskDiary(){
  dr={blob:null,secs:0,recording:false};
+ if(REV){diaryReview();return;}
  const weekWords=weekNewWords();
  ov('④ 说一句 · 写一句','','',5);diaryStep();
  window._ww=weekWords;
+}
+/* ---- 回看：看今天写过的话 ---- */
+function diaryReview(){
+ const d=today();
+ const rec=(st.diary||[]).filter(x=>x.d===d).pop();
+ const n=rec?(rec.t||'').trim().split(/\s+/).filter(Boolean).length:0;
+ let h='<div class="card"><b>今天写的句子</b>'+
+  (rec?'<div class="paper" style="margin-top:10px">'+esc(rec.t)+'</div>'+
+   '<div class="tiny muted" style="margin-top:8px">'+n+' 个词'+(rec.rec?' · 朗读 '+rec.rec+' 秒':'')+'</div>'
+   :'<div class="tiny muted" style="margin-top:10px">今天没有留下记录</div>')+'</div>';
+ h+='<div class="card"><b>本周新词</b><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:10px">'+
+  (weekNewWords().slice(0,12).map(w=>'<span class="pill b">'+esc(w)+'</span>').join('')||'<span class="tiny muted">暂无</span>')+
+  '</div><div class="tiny muted" style="margin-top:8px">回看不能修改，明天可以继续写新的</div></div>';
+ h+='<button class="btn block" style="margin-top:12px" data-act="revExit">返回今日</button>';
+ ov('④ 说一句 · 写一句 · 回看',h,'',0);
 }
 function weekNewWords(){
  const wk=weekKey(today());const out=[];
@@ -1121,15 +1341,27 @@ document.addEventListener('click',function(e){
   case 'task':{
    const t=a.dataset.t;
    if(!taskOpen(t)){toast('先完成上一步哦');return;}
-   if(taskDone(t)){toast('这项已经完成啦 ✅');return;}
+   /* 已完成的环节可以再次点进去回看内容（只读，不重复计分） */
+   REV=taskDone(t);
    ({vocab:taskVocab,read:taskRead,listen:taskListen,diary:taskDiary})[t]();break;}
+  case 'revExit':{REV=false;ovClose();break;}
   /* 背词 */
   case 'spk':say(a.dataset.t,0.85,{kind:'word',key:a.dataset.t});break;
   case 'spkSlow':{const _w=wById(vc.dic.list[vc.dic.i]);say(_w.w,0.6,{kind:'word',key:_w.w});break;}
-  case 'vcAns':{vc.showAns=true;const ok=a.dataset.v==='1';vc.total++;
-   if(ok){vc.correct++;grade(vc.ids[vc.i],true);}else{vc.wrong.push(vc.ids[vc.i]);grade(vc.ids[vc.i],false);}
-   save();vocabCard();break;}
-  case 'vcNext':{vc.showAns=false;vc.i++;vocabCard();break;}
+  case 'vqPick':{
+   const c=vc.cur;if(!c||c.answered)break;c.answered=true;
+   const i=+a.dataset.i,ok=(i===c.ans);vc.total++;
+   if(ok){vc.correct++;vc.combo++;if(vc.combo>vc.maxCombo)vc.maxCombo=vc.combo;grade(c.id,true);}
+   else{vc.combo=0;vc.wrong.push(c.id);grade(c.id,false);}
+   save();
+   a.classList.add(ok?'ok':'bad');
+   if(!ok){a.parentNode.querySelectorAll('.opt').forEach(x=>{if(+x.dataset.i===c.ans)x.classList.add('ok');});}
+   setTimeout(()=>vocabAnsCard(ok,c),ok?420:820);break;}
+  case 'vqNext':{vc.i++;vocabCard();break;}
+  case 'vcRetry':{vc.round=1;vc.ids=shuffle(vc.wrong);vc.wrong=[];vc.i=0;vc.total=0;vc.correct=0;vc.combo=0;vocabCard();break;}
+  case 'vcGoDic':{startDictation();break;}
+  case 'vrNext':{vr.i++;vocabReviewCard();break;}
+  case 'vrPrev':{vr.i=Math.max(0,vr.i-1);vocabReviewCard();break;}
   case 'dicCheck':{
    const w=wById(vc.dic.list[vc.dic.i]);const v=(document.getElementById('dicIn').value||'').trim().toLowerCase();
    const ok=v===w.w.toLowerCase();
@@ -1150,12 +1382,26 @@ document.addEventListener('click',function(e){
   case 'playFast':say(rd.r.text,1.0,{kind:'reader',key:rd.r.id});break;
   case 'rec':{
    if(!canRec()){toast('当前环境不支持录音，请用家长端导出的链接打开');return;}
-   if(rd.recording){stopRec().then(b=>{rd.recording=false;rd.blob=b;rd.secs=Math.max(1,Math.round(b.size/6000));readStep();});}
+   if(rd.recording){stopRec().then(b=>{
+     rd.recording=false;rd.blob=b;rd.analyzing=true;rd.times=(rd.times||0)+1;readStep();
+     const wc=(rd.r&&rd.r.text?rd.r.text.split(/\s+/).length:40);
+     analyzeRec(b).then(an=>{
+      rd.analyzing=false;
+      rd.sc=scoreRead(an,wc,rd.times);
+      rd.score=rd.sc.score;
+      rd.secs=Math.max(1,Math.round((an&&an.dur)||b.size/6000));
+      readStep();
+      if(rd.score>=82){confetti(26);}
+     });});}
    else{startRec().then(ok=>{if(ok){rd.recording=true;readStep();}});}
    break;}
   case 'readDone':{
-   if(!rd.blob||rd.secs<20){toast('再录长一点吧（至少 20 秒）');return;}
-   finishTask('read',{secs:rd.secs});ovClose();setTimeout(()=>{confetti(24);toast('跟读完成 ✅ 解锁听力');},150);break;}
+   if(!rd.blob){toast('先录一遍再完成哦');return;}
+   const _wc=(rd.r&&rd.r.text?rd.r.text.split(/\s+/).length:40);
+   const need=Math.max(4,Math.round(_wc/2.2*0.45));
+   if(rd.secs<need){toast('再录长一点吧（至少 '+need+' 秒）');return;}
+   finishTask('read',{secs:rd.secs,score:rd.score!=null?rd.score:80,times:rd.times||1});
+   ovClose();setTimeout(()=>{confetti(24);toast('跟读完成 ✅ 解锁听力');},150);break;}
   /* 听力 */
   case 'lp1':say(todayReader().text,0.8,{kind:'reader',key:todayReader().id});break;
   case 'lp2':say(todayReader().text,0.9,{kind:'reader',key:todayReader().id});break;

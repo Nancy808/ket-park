@@ -59,12 +59,16 @@ const getJSON = u => new Promise((res, rej) => {
 
   for (let i = 0; i < 60; i++) {
     // 卡片阶段：翻答案 -> 下一个；听写阶段：填词 -> 检查；最后：完成
-    const phase = await ev('(function(){if(document.getElementById("dicIn"))return "dictation";if(document.querySelector(\'#ov-body [data-act="vcAns"]\'))return "card";return "?"})()');
+    const phase = await ev('(function(){if(document.getElementById("dicIn"))return "dictation";if(document.querySelector(\'#ov-body [data-act="vqPick"]\'))return "quiz";if(document.querySelector(\'#ov-body [data-act="vqNext"]\'))return "anscard";if(document.querySelector(\'#ov-body [data-act="vcGoDic"]\'))return "settle";return "?"})()');
     let hit;
-    if (phase === 'card') {
-      hit = await clickAct(['vcAns']);
-      await sleep(90);
-      hit = await clickAct(['vcNext']);
+    if (phase === 'quiz') {
+      // 随机点一个选项（对错都走一遍）
+      hit = await ev('(function(){var bs=[].slice.call(document.querySelectorAll(\'#ov-body [data-act="vqPick"]\'));if(!bs.length)return "NO_OPT";bs[Math.floor(Math.random()*bs.length)].click();return "vqPick"})()');
+      await sleep(700);
+    } else if (phase === 'anscard') {
+      hit = await clickAct(['vqNext']);
+    } else if (phase === 'settle') {
+      hit = await clickAct(['vcGoDic', 'vcRetry']);
     } else if (phase === 'dictation') {
       await ev('(function(){var i=document.getElementById("dicIn");var w=document.querySelector("#ov-body .wcard");if(i){var t=(document.body.innerText.match(/[a-z]{2,}/)||["cat"])[0];i.value="x";}return 1})()');
       hit = await clickAct(['dicCheck', 'dicHint']);
