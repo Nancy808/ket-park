@@ -1,7 +1,7 @@
 /* 英语萌宠乐园 Service Worker
    改动 VER 版本号 → 平板自动更新
    策略：核心文件预缓存；音频按需缓存（不拖慢首次安装） */
-const VER = 'ket-park-v1.7.0';
+const VER = 'ket-park-v1.7.1';
 const ASSETS = [
   './',
   './index.html',

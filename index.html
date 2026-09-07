@@ -729,9 +729,11 @@ function vHome(){
  h+='<div class="tasks">';
  TASKS.forEach((t,i)=>{
   const dn=taskDone(t[0]),op=taskOpen(t[0]);
+  const tk=(d.tasks&&d.tasks[t[0]])||{};
+  const dTxt=dn?('已完成 · '+(tk.score!=null?tk.score+' 分 · ':'')+'点开可再看'):(op?t[2]:'先完成上一步');
   h+='<div class="tk '+(dn?'done':(op?'now':'lock'))+'" data-act="task" data-t="'+t[0]+'">'+
    '<div class="ic">'+(dn?'✅':(op?t[3]:'🔒'))+'</div>'+
-   '<div class="tx"><b>'+(i+1)+'. '+t[1]+'</b><span>'+(dn?'已完成 · 很棒':(op?t[2]:'先完成上一步'))+'</span></div>'+
+   '<div class="tx"><b>'+(i+1)+'. '+t[1]+'</b><span>'+dTxt+'</span></div>'+
    (dn?'<div class="ck">✓</div>':'')+'</div>';
  });
  h+='</div>';
