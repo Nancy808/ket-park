@@ -1,5 +1,28 @@
 # 英语萌宠乐园 · 部署到 GitHub Pages
 
+## ✅ 当前状态（2026-09-07 已推送）
+
+| 项 | 值 |
+|---|---|
+| 仓库 | https://github.com/Nancy808/ket-park |
+| 分支 | `master` |
+| Pages 地址 | **https://nancy808.github.io/ket-park/** |
+| 推送方式 | 本机 SSH（~/.ssh/id_ed25519 已绑 GitHub），`git push -u origin master` |
+
+代码已全部推上去（含 80MB 音频）。**只需再开启一次 Pages**（见第三节，分支选 `master` 不是 `main`）。
+
+以后改了东西要更新：
+```bash
+cd ket-park
+git add -A && git commit -m "说明改了什么"
+git push
+```
+平板下次打开会自动更新（sw.js 里 VER 版本号变了就会刷新缓存）。
+
+---
+
+## 以下为完整操作说明（首次部署已做，留档备查）
+
 全程约 15 分钟，只需要做一次。做完之后平板就有专属链接，添加到主屏后像一个 APP。
 
 ---
@@ -67,10 +90,10 @@ ket-park/
 1. 仓库顶部 → **Settings** 标签
 2. 左侧菜单 → **Pages**
 3. **Source** 选 `Deploy from a branch`
-4. **Branch** 选 `main`，右边文件夹选 `/ (root)`，点 **Save**
+4. **Branch** 选 **`master`**（本仓库主分支叫 master），右边文件夹选 `/ (root)`，点 **Save**
 5. 等 1–3 分钟，刷新页面，顶部会出现绿色提示：
    ```
-   Your site is live at https://你的用户名.github.io/ket-park/
+   Your site is live at https://nancy808.github.io/ket-park/
    ```
 
 **这个链接保存下来**，就是工作台的永久地址。
@@ -79,7 +102,7 @@ ket-park/
 
 ## 四、验证（PC 上先试）
 
-浏览器打开 `https://你的用户名.github.io/ket-park/`，确认：
+浏览器打开 **https://nancy808.github.io/ket-park/** ，确认：
 - 出现「英语萌宠乐园」首页
 - 点「背词」能听到发音（PC 上先听一下）
 - 随便点几下，无报错
