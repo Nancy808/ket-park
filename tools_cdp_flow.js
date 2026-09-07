@@ -85,14 +85,14 @@ const getJSON = u => new Promise((res, rej) => {
   await ev('typeof ovClose==="function"&&ovClose()'); await sleep(400);
   await step('⑧ 跟读已解锁', 'taskOpen("read")');
 
-  /* ---------- 跟读 ---------- */
-  await ev('taskRead()'); await sleep(1000);
-  await step('⑨ 跟读等级', '(document.body.innerText.match(/第 L\\d 级[^\\n]*/)||["NOT FOUND"])[0]');
-  await step('⑩ 跟读音频', '(async()=>{var u="audio/readers/"+voiceDir()+"/r"+(rd&&rd.r?rd.r.id:101)+".mp3";var r=await fetch(u,{headers:{Range:"bytes=0-1"}});return u+" -> "+r.status})()');
-  await step('⑪ 跟读题目', '(rd&&rd.r)?rd.r.q.length:"n/a"');
-  await ev('finishTask("read",{})'); await sleep(500); await ev('ovClose&&ovClose()'); await sleep(300);
+  /* ---------- 跟读：逐句模式，直接注入 3 句成绩再完成 ---------- */
+  await ev('(function(){taskRead();return 1})()'); await sleep(900);
+  await step('⑨ 跟读句数', 'rd.sents.length');
+  await ev('(function(){rd.res=[{score:92,tips:[],dur:2.6,ref:2.3},{score:78,tips:["再大声一点"],dur:2.9,ref:2.5},{score:88,tips:[],dur:3.1,ref:2.8}];rd.avg=86;rd.summary=true;readSummary();return 1})()'); await sleep(700);
+  await step('⑩ 跟读总结分', 'rd.avg');
+  await ev('(function(){var b=document.querySelector(\'#ov-body [data-act="readDone"]\');if(b)b.click();return 1})()'); await sleep(900);
+  await step('⑪ 跟读完成', '!!(getDay().tasks.read&&getDay().tasks.read.done)');
 
-  /* ---------- 听力 ---------- */
   await step('⑫ 听力已解锁', 'taskOpen("listen")');
   await ev('taskListen()'); await sleep(900);
   await step('⑬ 听力面板', '(document.body.innerText.match(/③[^\\n]*/)||["NOT FOUND"])[0]');
