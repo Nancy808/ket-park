@@ -556,7 +556,7 @@ function stopRec(){return new Promise(res=>{if(!rec){res(null);return;}
   try{rec.getTracks&&0;}catch(e){}
   if(rec.stream)rec.stream.getTracks().forEach(t=>t.stop());
   recBlob=b;res(b);};rec.stop();});}
-function audioTag(b){return '<audio controls src="'+URL.createObjectURL(b)+'" style="width:100%;margin-top:10px"></audio>';}
+function audioTag(b){if(!b)return '';try{return '<audio controls src="'+URL.createObjectURL(b)+'" style="width:100%;margin-top:10px"></audio>';}catch(e){return '';}}
 /* 录音分析：时长 / 平均音量(dB) / 有声帧占比 —— 用于跟读评分 */
 function analyzeRec(blob){
  return new Promise(res=>{
@@ -1136,142 +1136,189 @@ let rd={text:null,recording:false,blob:null,secs:0};
 function taskRead(){
  const r=todayReader();if(!r){ov('② 跟读','<div class="empty">读物内容加载中</div>','');return;}
  rd={r:r,recording:false,blob:null,secs:0,times:0,score:null,analyzing:false,sc:null,
-  sents:splitSents(r.text),si:0,res:[],summary:false,avg:null};
+  sents:splitSents(r.text),mode:'full',oneIdx:0,oneRes:null,res:null,summary:false};
  ov('② 跟读'+(REV?' · 回看':''),'','',10);readStep();
 }
-/* 逐句跟读：一句一句录，每句单独评分，能定位「在哪儿卡住」 */
+/* 跟读：整篇连读（默认）+ 单句加练（可选）
+   孩子嫌一句一句太麻烦 → 默认整篇一次录完；
+   但照样分析「在哪儿卡住」，定位到第几句的哪个词。 */
 function splitSents(t){
  const m=String(t||'').match(/[^.!?]+[.!?]*/g);
  return m?m.map(x=>x.trim()).filter(x=>x.length>1):[String(t||'')];
 }
-function sentRefSec(sent){return Math.max(1.2,sent.split(/\s+/).length/2.2);}   // 该句参考时长
+function refSec(text){return Math.max(3,text.split(/\s+/).length/2.2);}   // 参考时长
+function sentRefSec(sent){return Math.max(1.2,sent.split(/\s+/).length/2.2);}
+/* 整篇录音里的长静音 → 落到第几句的第几个词；句末停顿属正常，不算卡壳 */
+function locateStuck(an,text){
+ if(!an||!an.gapSec||an.gapSec<0.9)return null;
+ const sents=splitSents(text);
+ const words=String(text).split(/\s+/).filter(Boolean);
+ const gi=Math.max(0,Math.min(words.length-1,Math.round(an.gapAt*words.length)));
+ let acc=0;
+ for(let i=0;i<sents.length;i++){
+  const n=sents[i].split(/\s+/).length;
+  if(gi<acc+n){
+   const within=gi-acc;
+   if(n-within<=1)return null;              // 停在句末 = 正常换气
+   return {si:i,wi:within,word:words[gi],sent:sents[i]};
+  }
+  acc+=n;
+ }
+ return null;
+}
+/* 整篇评分 */
+function scoreFull(an,r,times){
+ const text=r.text,ref=refSec(text);
+ if(!an)return {score:80,tips:['这次没分析成功，先按完成记录'],dur:0,ref:ref};
+ const ratio=an.dur/ref;
+ if(ratio<0.6)return {score:0,tips:['这篇还没读完（只读了 '+Math.round(ratio*100)+'%），再读一次，要读到最后一个词'],
+  dur:an.dur,ref:ref,incomplete:true};
+ let sc=58,tips=[];
+ if(ratio>=0.8&&ratio<=1.9)sc+=16;
+ else if(ratio>1.9&&ratio<=2.8){sc+=10;tips.push('读得比示范慢不少，试着一句接一句，别停下来想');}
+ else if(ratio>=0.6&&ratio<0.8){sc+=10;tips.push('读得有点赶，把每个词的音咬清楚');}
+ else{sc+=6;tips.push('中间停得太久了，先多听两遍示范再读');}
+ if(an.db>-25)sc+=14;
+ else if(an.db>-32)sc+=10;
+ else if(an.db>-40){sc+=5;tips.push('再大声一点，让房间另一头也听得见');}
+ else{sc+=2;tips.push('声音有点小，深吸一口气，把每个词都送出来');}
+ if(an.voiced>=0.65)sc+=12;
+ else if(an.voiced>=0.45)sc+=8;
+ else{sc+=3;tips.push('中间空白有点多，试着一口气读完一句话');}
+ let stuck=null;
+ if(an.voiced>=0.4){
+  stuck=locateStuck(an,text);
+  if(stuck){sc-=6;tips.unshift('第 '+(stuck.si+1)+' 句读到「'+stuck.word+'」的时候停了一下，这个词不熟吗？');}
+ }
+ if(times>=2)sc+=3;
+ if(ratio<0.8)sc=Math.min(sc,80);
+ if(stuck)sc=Math.min(sc,82);
+ if(an.db<-42)sc=Math.min(sc,78);
+ if(an.voiced<0.4)sc=Math.min(sc,80);
+ return {score:Math.max(40,Math.min(100,sc)),tips:tips,dur:an.dur,ref:ref,stuck:stuck};
+}
+/* 单句评分（加练用） */
+function scoreSent(an,sent){
+ const words=sent.split(/\s+/).filter(Boolean),ref=sentRefSec(sent);
+ if(!an)return {score:80,tips:['这句没分析成功，先算完成'],dur:0,ref:ref};
+ const ratio=an.dur/ref;
+ if(ratio<0.5)return {score:0,tips:['这句没读完，再读一次'],dur:an.dur,ref:ref,incomplete:true};
+ let sc=58,tips=[];
+ if(ratio>=0.7&&ratio<=2.0)sc+=16;
+ else if(ratio>2.0){sc+=9;tips.push('读得有点慢');}
+ else{sc+=9;tips.push('读得有点赶');}
+ if(an.db>-25)sc+=14;else if(an.db>-32)sc+=10;else{sc+=4;tips.push('再大声一点');}
+ if(an.voiced>=0.65)sc+=12;else if(an.voiced>=0.45)sc+=8;else{sc+=3;tips.push('中间空白有点多');}
+ let stuck=null;
+ if(an.gapSec>=0.8&&an.gapAt>0.12&&an.gapAt<0.88&&an.voiced>=0.4){
+  const wi=Math.min(words.length-1,Math.max(0,Math.round(an.gapAt*words.length)));
+  stuck={wi:wi,word:words[wi]};sc-=6;
+  tips.unshift('读到「'+words[wi]+'」的时候停了一下，先听一遍示范再读');
+ }
+ if(ratio<0.7)sc=Math.min(sc,80);
+ if(stuck)sc=Math.min(sc,82);
+ if(an.db<-42)sc=Math.min(sc,78);
+ return {score:Math.max(40,Math.min(100,sc)),tips:tips,dur:an.dur,ref:ref,stuck:stuck};
+}
 function readStep(){
  const r=rd.r;
  if(REV){readReview(r,readHead(r));return;}
  if(rd.summary){readSummary();return;}
- const sents=rd.sents,i=rd.si;
- if(i>=sents.length){rd.summary=true;readSummary();return;}
- const cur=sents[i],res=rd.res[i];
- let h=readHead(r);
- h+='<div class="card" style="text-align:center">';
- h+='<div class="tiny muted">第 '+(i+1)+' / '+sents.length+' 句 · 参考 '+sentRefSec(cur).toFixed(1)+' 秒</div>';
- h+='<div style="font-size:22px;font-weight:800;line-height:1.5;margin:12px 4px">'+esc(cur)+'</div>';
- h+='<div class="row" style="gap:8px;justify-content:center;flex-wrap:wrap">'+
-  '<button class="btn o sm" data-act="rsPlay">🔊 听示范</button>'+
-  '<button class="btn o sm" data-act="rsPlaySlow">🐢 慢速</button></div>';
- if(rd.recording){
-  h+='<div style="margin-top:14px"><div style="font-size:40px">🔴</div>'+
-   '<div class="tiny muted" style="margin-top:6px">正在录…读完这句再点一次</div>'+
-   '<button class="rec on" data-act="rsRec" style="margin-top:10px">■</button></div>';
- }else if(rd.analyzing){
-  h+='<div style="margin-top:14px"><div style="font-size:34px">⏳</div><div class="tiny muted">正在分析这一句…</div></div>';
- }else if(res){
-  const g=readGrade(res.score);
-  h+='<div style="margin-top:14px"><div style="font-size:36px">'+g.e+'</div>'+
-   '<div style="font-size:24px;font-weight:800;margin-top:2px">'+res.score+' <span style="font-size:14px;color:var(--muted)">分</span></div>'+
-   '<div style="font-weight:700">'+g.t+'</div>'+
-   '<div class="tiny muted" style="margin-top:6px">读了 '+res.dur.toFixed(1)+' 秒 · 参考 '+sentRefSec(cur).toFixed(1)+' 秒</div>'+
-   (res.tips.length?'<div style="margin-top:10px;text-align:left;background:#FFF3EC;border-radius:12px;padding:11px">'+
-    '<b style="font-size:14px">这句要注意：</b>'+res.tips.map(t=>'<div class="tiny" style="margin-top:4px">· '+esc(t)+'</div>').join('')+'</div>':'')+
-   '</div>'+audioTag(rd.blob)+
-   '<div class="row" style="margin-top:12px;gap:8px">'+
-   '<button class="btn o" style="flex:1" data-act="rsRec">🎤 再读一遍</button>'+
-   '<button class="btn" style="flex:1" data-act="rsNext">'+(i+1>=sents.length?'看总结 →':'下一句 →')+'</button></div>';
- }else{
-  h+='<div style="margin-top:14px"><button class="rec" data-act="rsRec">🎤</button>'+
-   '<div class="tiny muted" style="margin-top:8px">先听 1 遍示范，再点录音读这一句</div>'+
-   '<button class="btn o block sm" style="margin-top:10px" data-act="rsSkip">这句跳过</button></div>';
- }
- h+='</div>';
- /* 整篇原文，当前句高亮 */
- h+='<div class="paper" style="margin-top:12px;font-size:15px">'+esc(r.title?r.title:'')+
-  '<div style="margin-top:8px">'+sents.map((x,k)=>'<span style="'+(k===i?'background:#FFE3D3;border-radius:6px;padding:1px 3px;font-weight:700':(rd.res[k]?'color:var(--muted)':''))+'">'+esc(x)+'</span>').join(' ')+'</div></div>';
- ovBodySet(h);
+ if(rd.mode==='one'){readOneStep();return;}
+ readFullStep();
 }
 function readHead(r){
- let h='<div class="tiny muted" style="text-align:center;margin-bottom:10px">第 L'+r.lv+' 级 · '+(LV_NAME[r.lv]||'')+' · 共 '+(rd.sents?rd.sents.length:0)+' 句 · M'+moduleOf(today())+' 月</div>';
+ let h='<div class="tiny muted" style="text-align:center;margin-bottom:10px">第 L'+r.lv+' 级 · '+(LV_NAME[r.lv]||'')+' · 约 '+(r.text.split(/\s+/).length)+' 词 · M'+moduleOf(today())+' 月</div>';
  h+='<div class="row" style="gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:10px">'+
   '<button class="btn o sm" data-act="playFull">🔊 整篇朗读</button>'+
   '<button class="btn o sm" data-act="playSlow">🐢 慢速 0.7×</button></div>';
  return h;
 }
-/* 单句评分：完整度 + 音量 + 流畅度 + 卡壳定位 */
-function scoreSent(an,sent,times){
- const words=sent.split(/\s+/).filter(Boolean);
- const ref=sentRefSec(sent);
- let s=58,tips=[];
- if(!an)return {score:80,tips:['这句没分析成功，先算完成'],dur:0,ref:ref,stuck:null};
- const ratio=an.dur/ref;
- /* 1. 完整度 —— 没读完就是没读完，不给分 */
- if(ratio<0.5){
-  return {score:0,tips:['这句好像没读完，再读一次，要读到最后的句号'],dur:an.dur,ref:ref,stuck:null,incomplete:true};
- }
- if(ratio>=0.7&&ratio<=2.0)s+=16;
- else if(ratio>2.0&&ratio<=3.0){s+=9;tips.push('读得有点慢，试着连贯一点');}
- else if(ratio>=0.5&&ratio<0.7){s+=9;tips.push('读得有点赶，把每个词咬清楚');}
- else{s+=5;tips.push('中间停得太久了');}
- /* 2. 音量 */
- if(an.db>-25)s+=14;
- else if(an.db>-32)s+=10;
- else if(an.db>-40){s+=5;tips.push('再大声一点，让房间另一头也听得见');}
- else{s+=2;tips.push('声音太小了，深吸一口气再读');}
- /* 3. 流畅度（开口率） */
- if(an.voiced>=0.65)s+=12;
- else if(an.voiced>=0.45)s+=8;
- else{s+=3;tips.push('中间空白有点多，试着一口气读完');}
- /* 4. 卡壳定位：句子中间出现长静音 → 具体到哪个词 */
- let stuck=null;
- if(an.gapSec>=0.8&&an.gapAt>0.12&&an.gapAt<0.9&&an.voiced>=0.4){
-  const wi=Math.min(words.length-1,Math.max(0,Math.round(an.gapAt*words.length)));
-  stuck={w:words[wi],at:an.gapAt};
-  s-=6;
-  tips.unshift('读到「'+words[wi]+'」的时候停了一下，这个词不熟吗？先听一遍示范再读');
- }
- if(times>=2)s+=3;
- /* 硬伤钳制：读太快 / 卡壳 / 太小声，都不能拿到高分 */
- if(ratio<0.7)s=Math.min(s,80);
- if(stuck)s=Math.min(s,82);
- if(an.db<-42)s=Math.min(s,78);
- if(an.voiced<0.4)s=Math.min(s,80);
- return {score:Math.max(40,Math.min(100,s)),tips:tips,dur:an.dur,ref:ref,stuck:stuck};
+function readFullStep(){
+ const r=rd.r,res=rd.res;
+ let h=readHead(r);
+ h+='<div class="paper"><h3>'+esc(r.title)+'</h3>'+esc(r.text).replace(/\n/g,'<br>')+
+  '<div class="cn">'+esc(r.cn)+'</div></div>';
+ h+='<div class="card" style="text-align:center;margin-top:14px">'+
+  '<div class="tiny muted" style="margin-bottom:8px">先听 1–2 遍示范 → 点录音，一口气把整篇读完</div>'+
+  '<button class="rec '+(rd.recording?'on':'')+'" data-act="rsRec">'+(rd.recording?'■':'🎤')+'</button>';
+ if(rd.recording)h+='<div class="tiny muted" style="margin-top:10px">录音中…读完最后一句再点 ■</div>';
+ else if(rd.analyzing)h+='<div class="tiny muted" style="margin-top:10px">正在分析…</div>';
+ else if(res){
+  const g=readGrade(res.score);
+  h+='<div style="margin-top:12px"><div style="font-size:38px">'+g.e+'</div>'+
+   '<div style="font-size:26px;font-weight:800;margin-top:2px">'+(res.incomplete?'—':res.score+' <span style="font-size:15px;color:var(--muted)">分</span>')+'</div>'+
+   '<div style="font-weight:700;margin-top:2px">'+(res.incomplete?'还没读完':g.t)+'</div>'+
+   '<div class="tiny muted" style="margin-top:6px">读了 '+res.dur.toFixed(1)+' 秒 · 参考 '+res.ref.toFixed(1)+' 秒</div>'+
+   (res.tips.length?'<div style="margin-top:10px;text-align:left;background:#FFF3EC;border-radius:12px;padding:11px">'+
+    '<b style="font-size:14px">这次可以更好：</b>'+res.tips.map(t=>'<div class="tiny" style="margin-top:4px">· '+esc(t)+'</div>').join('')+'</div>':'')+
+   '</div>'+audioTag(rd.blob);
+  if(res.incomplete){
+   h+='<button class="btn block" style="margin-top:12px" data-act="rsRec">🎤 再读一遍</button>';
+  }else{
+   h+='<div class="row" style="margin-top:12px;gap:8px">'+
+    (res.stuck?'<button class="btn o" style="flex:1" data-act="rsDrill">🎯 单独练这句</button>':'')+
+    '<button class="btn o" style="flex:1" data-act="rsRec">🎤 再读一遍</button>'+
+    '<button class="btn" style="flex:1" data-act="readDone">完成 ✓</button></div>';
+  }
+ }else{h+='<div class="tiny muted" style="margin-top:10px">还没录音</div>';}
+ h+='</div>';
+ ovBodySet(h);
 }
-/* 全部句子读完后：总结页 */
+/* 单句加练：只练卡住的那句 */
+function readOneStep(){
+ const r=rd.r,sents=rd.sents,i=rd.oneIdx||0,cur=sents[i],res=rd.oneRes;
+ let h=readHead(r)+'<div class="card" style="text-align:center">';
+ h+='<div class="tiny muted">加练第 '+(i+1)+' 句 · 参考 '+sentRefSec(cur).toFixed(1)+' 秒</div>';
+ h+='<div style="font-size:22px;font-weight:800;line-height:1.5;margin:12px 4px">'+esc(cur)+'</div>';
+ h+='<div class="row" style="gap:8px;justify-content:center"><button class="btn o sm" data-act="rsOnePlay">🔊 听这句</button></div>';
+ if(rd.recording)h+='<div style="margin-top:14px"><div style="font-size:38px">🔴</div><button class="rec on" data-act="rsRec" style="margin-top:8px">■</button></div>';
+ else if(rd.analyzing)h+='<div class="tiny muted" style="margin-top:14px">分析中…</div>';
+ else if(res){
+  const g=readGrade(res.score);
+  h+='<div style="margin-top:14px"><div style="font-size:34px">'+g.e+'</div>'+
+   '<div style="font-size:24px;font-weight:800">'+(res.incomplete?'—':res.score+' 分')+'</div>'+
+   '<div class="tiny muted">'+g.t+'</div>'+
+   (res.tips.length?'<div class="tiny muted" style="margin-top:6px">'+esc(res.tips[0])+'</div>':'')+'</div>'+audioTag(rd.blob)+
+   '<div class="row" style="margin-top:12px;gap:8px">'+
+   '<button class="btn o" style="flex:1" data-act="rsRec">🎤 再来</button>'+
+   '<button class="btn" style="flex:1" data-act="rsOneDone">练好了 ✓</button></div>';
+ }else{
+  h+='<div style="margin-top:14px"><button class="rec" data-act="rsRec">🎤</button>'+
+   '<div class="tiny muted" style="margin-top:8px">听一遍，再读这一句</div></div>';
+ }
+ h+='</div>';
+ ovBodySet(h);
+}
 function readSummary(){
- const done=rd.res.filter(x=>x&&!x.incomplete);
- if(!done.length){
+ const res=rd.res;
+ if(!res||res.incomplete){
   ovBodySet('<div class="wcard" style="text-align:center"><div style="font-size:42px">🎤</div>'+
-   '<div style="font-weight:800;margin-top:6px">还没读到可以评分的长度</div>'+
-   '<div class="tiny muted" style="margin-top:6px">每句都要读完整哦</div>'+
-   '<button class="btn block" style="margin-top:16px" data-act="rsRestart">重新读一遍</button></div>');return;}
- const avg=Math.round(done.reduce((a,b)=>a+b.score,0)/done.length);
- const g=readGrade(avg);
- const weak=[];
- rd.res.forEach((x,i)=>{if(x&&!x.incomplete&&x.score<80)weak.push({i:i,s:x});});
+   '<div style="font-weight:800;margin-top:6px">整篇还没读完</div>'+
+   '<div class="tiny muted" style="margin-top:6px">要读到最后一个词才算一次哦</div>'+
+   '<button class="btn block" style="margin-top:16px" data-act="rsRec">再读一遍</button></div>');return;}
+ const g=readGrade(res.score);
  let h='<div class="wcard" style="text-align:center">'+
   '<div style="font-size:40px">'+g.e+'</div>'+
-  '<div style="font-size:26px;font-weight:800;margin-top:2px">'+avg+' <span style="font-size:14px;color:var(--muted)">分</span></div>'+
+  '<div style="font-size:32px;font-weight:800;margin-top:2px">'+res.score+' <span style="font-size:15px;color:var(--muted)">分</span></div>'+
   '<div style="font-weight:700">'+g.t+'</div>'+
-  '<div class="tiny muted" style="margin-top:4px">'+g.d+' · 完成 '+done.length+' / '+rd.sents.length+' 句</div></div>';
- h+='<div class="sec-t">每一句</div>';
- rd.sents.forEach((s,i)=>{
-  const x=rd.res[i];
-  h+='<div class="card" style="padding:11px 13px"><div class="spread">'+
-   '<div style="flex:1;font-size:14px">'+esc(s.length>42?s.slice(0,42)+'…':s)+'</div>'+
-   '<b style="margin-left:8px;color:'+(x?(x.incomplete?'#E86A33':(x.score>=85?'#2E9E5B':(x.score>=70?'#E8A033':'#E86A33'))):'#AAA')+'">'+
-   (x?(x.incomplete?'未读完':x.score+'分'):'跳过')+'</b></div>'+
-   (x&&x.tips.length?'<div class="tiny muted" style="margin-top:4px">'+esc(x.tips[0])+'</div>':'')+'</div>';
- });
- if(weak.length){
-  h+='<div class="card" style="background:#FFF3EC"><b>建议再练这几句</b>'+
-   weak.slice(0,3).map(x=>'<div class="tiny" style="margin-top:6px">第 '+(x.i+1)+' 句：'+
-    esc(x.s.tips[0]||'再读一遍会更好')+'</div>').join('')+'</div>';
+  '<div class="tiny muted" style="margin-top:4px">'+g.d+'</div>'+
+  '<div class="tiny muted" style="margin-top:8px">读了 '+res.dur.toFixed(1)+' 秒 · 参考 '+res.ref.toFixed(1)+' 秒</div></div>';
+ if(res.tips.length){
+  h+='<div class="card" style="background:#FFF3EC"><b>下次可以更好</b>'+
+   res.tips.map(t=>'<div class="tiny" style="margin-top:6px">· '+esc(t)+'</div>').join('')+'</div>';
+ }
+ if(res.stuck){
+  h+='<div class="card"><b>卡住的地方</b>'+
+   '<div style="margin-top:8px;font-size:15px">第 '+(res.stuck.si+1)+' 句：'+esc(res.stuck.sent)+'</div>'+
+   '<div class="tiny muted" style="margin-top:6px">在「'+esc(res.stuck.word)+'」这里停了一下</div>'+
+   '<button class="btn o block sm" style="margin-top:10px" data-act="rsDrill">🎯 单独练这一句</button></div>';
  }
  h+='<div class="row" style="margin-top:14px;gap:8px">'+
-  '<button class="btn o" style="flex:1" data-act="rsRestart">🎤 全部重读</button>'+
+  '<button class="btn o" style="flex:1" data-act="rsRec">🎤 再读一遍</button>'+
   '<button class="btn" style="flex:1" data-act="readDone">完成跟读 ✓</button></div>';
  ovBodySet(h);
- rd.avg=avg;
- if(avg>=85)confetti(32);
+ if(res.score>=85)confetti(32);
 }
 /* ---- 回看：看原文 + 重听 + 看理解题答案 + 上次得分，不重新录音 ---- */
 function readReview(r,head){
@@ -1497,27 +1544,29 @@ document.addEventListener('click',function(e){
   case 'rec':case 'rsRec':{
    if(!canRec()){toast('当前环境不支持录音，请用家长端导出的链接打开');return;}
    if(rd.recording){stopRec().then(b=>{
-     rd.recording=false;rd.blob=b;rd.analyzing=true;readStep();
-     const sent=rd.sents[rd.si]||'';
+     rd.recording=false;rd.blob=b;rd.analyzing=true;rd.times=(rd.times||0)+1;readStep();
      analyzeRec(b).then(an=>{
       rd.analyzing=false;
-      const r=scoreSent(an,sent,(rd.res[rd.si]?2:1));
-      rd.res[rd.si]=r;rd.secs=Math.max(1,Math.round((an&&an.dur)||0));
-      rd.score=r.score;
+      if(rd.mode==='one'){
+       const sent=rd.sents[rd.oneIdx]||'';
+       rd.oneRes=scoreSent(an,sent);rd.score=rd.oneRes.score;
+      }else{
+       rd.res=scoreFull(an,rd.r,rd.times);rd.score=rd.res.score;
+      }
+      rd.secs=Math.max(1,Math.round((an&&an.dur)||0));
       readStep();
      });});}
    else{startRec().then(ok=>{if(ok){rd.recording=true;readStep();}});}
    break;}
-  case 'rsNext':{rd.si++;rd.blob=null;readStep();break;}
-  case 'rsSkip':{rd.res[rd.si]={score:0,tips:['这句跳过了'],dur:0,ref:0,skipped:true};rd.si++;rd.blob=null;readStep();break;}
-  case 'rsPlay':say(rd.sents[rd.si]||'',0.85,{kind:'reader',key:rd.r.id});break;
-  case 'rsPlaySlow':say(rd.sents[rd.si]||'',0.6,{kind:'reader',key:rd.r.id});break;
-  case 'rsRestart':{rd.si=0;rd.res=[];rd.summary=false;rd.blob=null;readStep();break;}
+  case 'rsDrill':{const st=rd.res&&rd.res.stuck;rd.mode='one';rd.oneIdx=st?st.si:0;rd.oneRes=null;rd.blob=null;readOneStep();break;}
+  case 'rsOnePlay':say(rd.sents[rd.oneIdx]||'',0.85,{kind:'reader',key:rd.r.id});break;
+  case 'rsOneDone':{rd.mode='full';rd.oneRes=null;rd.blob=null;rd.summary=true;readSummary();break;}
+  case 'rsRestart':{rd.mode='full';rd.res=null;rd.oneRes=null;rd.summary=false;rd.blob=null;rd.times=0;readFullStep();break;}
   case 'readDone':{
-   const done=(rd.res||[]).filter(x=>x&&!x.incomplete&&!x.skipped);
-   if(!done.length){toast('至少要完整读完一句才能评分哦');return;}
-   finishTask('read',{score:rd.avg!=null?rd.avg:80,times:1,
-    sents:rd.sents.length,doneN:done.length});
+   const r0=rd.res;
+   if(!r0||r0.incomplete){toast('整篇还没读完，再读一遍吧');return;}
+   finishTask('read',{score:r0.score,times:rd.times||1,dur:Math.round(r0.dur),
+    stuck:r0.stuck?(r0.stuck.si+1)+'句:'+r0.stuck.word:''});
    ovClose();setTimeout(()=>{confetti(24);toast('跟读完成 ✅ 解锁听力');},150);break;}
   /* 听力 */
   case 'lp1':say(todayReader().text,0.8,{kind:'reader',key:todayReader().id});break;

@@ -88,8 +88,8 @@ const getJSON = u => new Promise((res, rej) => {
   /* ---------- 跟读：逐句模式，直接注入 3 句成绩再完成 ---------- */
   await ev('(function(){taskRead();return 1})()'); await sleep(900);
   await step('⑨ 跟读句数', 'rd.sents.length');
-  await ev('(function(){rd.res=[{score:92,tips:[],dur:2.6,ref:2.3},{score:78,tips:["再大声一点"],dur:2.9,ref:2.5},{score:88,tips:[],dur:3.1,ref:2.8}];rd.avg=86;rd.summary=true;readSummary();return 1})()'); await sleep(700);
-  await step('⑩ 跟读总结分', 'rd.avg');
+  await ev('(function(){rd.res=scoreFull({dur:15,db:-20,voiced:0.8,gapSec:0.3,gapAt:0.95},rd.r,1);rd.times=1;rd.summary=true;readSummary();return 1})()'); await sleep(700);
+  await step('⑩ 跟读整篇分', 'rd.res.score');
   await ev('(function(){var b=document.querySelector(\'#ov-body [data-act="readDone"]\');if(b)b.click();return 1})()'); await sleep(900);
   await step('⑪ 跟读完成', '!!(getDay().tasks.read&&getDay().tasks.read.done)');
 
