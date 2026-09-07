@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>英语萌宠乐园 · 平板扫一扫</title>
+<style>
+  :root{
+    --bg:#FFF8F2; --card:#FFFFFF; --ink:#2C2320; --muted:#8A7A70;
+    --line:#F0E2D6; --brand:#F0803C; --ok:#2E9E5B;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:22px;
+    padding:26px 28px;max-width:660px;width:100%;text-align:center;
+    box-shadow:0 10px 34px rgba(200,150,110,.14)}
+  .tag{display:inline-block;background:#FFE8D6;color:#B85C1E;font-size:13px;
+    font-weight:700;padding:5px 14px;border-radius:999px;margin-bottom:12px}
+  h1{margin:0 0 4px;font-size:25px;letter-spacing:.5px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+  .qrs{display:flex;gap:18px;justify-content:center;flex-wrap:wrap}
+  .qbox{flex:1 1 220px;max-width:270px;background:#fff;border:1px solid var(--line);
+    border-radius:16px;padding:14px}
+  .qbox.hot{border:2px solid var(--brand);background:#FFF9F4}
+  .qbox img{width:100%;display:block;border-radius:8px}
+  .qt{font-size:15px;font-weight:800;margin-bottom:9px}
+  .qd{font-size:12.5px;color:var(--muted);margin-top:9px;line-height:1.6}
+  .url{margin-top:18px;font-size:14px;font-weight:700;word-break:break-all;
+    background:#FFF8F2;border:1px dashed var(--line);border-radius:12px;padding:10px 12px;
+    font-family:ui-monospace,Consolas,monospace}
+  .steps{text-align:left;margin-top:20px;background:#FFFBF7;border:1px solid var(--line);
+    border-radius:14px;padding:15px 18px}
+  .steps b{display:block;font-size:15px;margin-bottom:8px}
+  .steps ol{margin:0;padding-left:19px;font-size:14px;line-height:1.9;color:#4A3E38}
+  .warn{margin-top:14px;font-size:13px;color:#B85C1E;background:#FFF3E6;
+    border-radius:12px;padding:11px 13px;line-height:1.7;text-align:left}
+  .ver{margin-top:13px;font-size:12px;color:var(--muted)}
+  @media print{body{background:#fff}.card{box-shadow:none}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="tag">KET 备考 · 每日 30 分钟</div>
+  <h1>英语萌宠乐园</h1>
+  <div class="sub">平板用「扫一扫」对着码 → 直接打开</div>
+
+  <div class="qrs">
+    <div class="qbox hot">
+      <div class="qt">🔄 清掉今天 · 重做一遍</div>
+      <img src="qr_redo.png" alt="清今日重做">
+      <div class="qd">清空今天的打卡记录，<br>今天新学的词退回「未学」，<br>可以完整重走一遍</div>
+    </div>
+    <div class="qbox">
+      <div class="qt">▶️ 直接打开</div>
+      <img src="qr_ketpark.png" alt="直接打开">
+      <div class="qd">保留今天已经做过的<br>内容，接着往下做</div>
+    </div>
+  </div>
+
+  <div class="url">https://nancy808.github.io/ket-park/</div>
+
+  <div class="steps">
+    <b>平板上这样打开</b>
+    <ol>
+      <li>打开<strong>华为自带「浏览器」</strong>（不是 Edge）</li>
+      <li>点地址栏右边的<strong>扫一扫</strong>，对准上面的码</li>
+      <li>页面出来后，菜单 → <strong>添加到桌面</strong></li>
+      <li>回到桌面点仓鼠图标，全屏打开、断网也能用</li>
+    </ol>
+  </div>
+
+  <div class="warn">
+    ⚠️ Edge 的「安装应用」在这台平板上装不上（鸿蒙没有 Google 服务），别再试了。<br>
+    以后想重做今天，也可以：家长端（密码 1234）→ 打卡管理 → <strong>重做今天</strong>。<br>
+    首次打开弹「允许使用麦克风」→ 选<strong>允许</strong>，跟读录音要用。
+  </div>
+
+  <div class="ver">当前版本 v1.8.0 · 2026-09-07</div>
+</div>
+</body>
+</html>

@@ -643,6 +643,19 @@ function grade(id,ok){const r=wr(id);r.intro=true;r.seen++;
  if(ok){r.reps++;r.iv=r.iv===0?1:(r.iv===1?3:Math.min(30,Math.round(r.iv*r.ef)));r.ef=Math.min(2.8,r.ef+0.1);}
  else{r.wrong++;r.iv=1;r.reps=0;r.ef=Math.max(1.3,r.ef-0.2);}
  r.due=addDays(today(),r.iv);}
+/* ---------- 重做今天：清今日打卡记录 + 回滚今天新学的词，可以完整再走一遍 ---------- */
+function resetToday(){
+ const k=today();const d=st.day[k];let rolled=0;
+ if(d&&d.newIds&&d.newIds.length){
+  d.newIds.forEach(id=>{
+   const r=st.words[id];if(!r)return;
+   r.intro=false;r.seen=0;r.reps=0;r.iv=0;r.wrong=0;r.ef=2.5;r.due=today();rolled++;
+  });
+ }
+ if(d)delete st.day[k];
+ save();
+ return rolled;
+}
 function mastered(){return Object.values(st.words).filter(r=>r.intro&&r.reps>=2&&r.iv>=7).length;}
 function introduced(){return Object.values(st.words).filter(r=>r.intro).length;}
 function rankOf(n){let r=RANKS[0];RANKS.forEach(x=>{if(n>=x[0])r=x;});return r[1];}
@@ -915,7 +928,9 @@ function vParent(){
   '<div class="list-item"><div class="t"><b>读物等级</b><span>当前 L'+curLevel()+' · '+(LV_NAME[curLevel()]||'')+'</span></div>'+
   '<button class="btn o sm" data-act="setLevel">调整</button></div>'+
   '<div class="list-item"><div class="t"><b>手动补打卡</b><span>孩子已做但忘记点完成</span></div>'+
-  '<button class="btn o sm" data-act="forceDone">补今天</button></div></div>';
+  '<button class="btn o sm" data-act="forceDone">补今天</button></div>'+
+  '<div class="list-item"><div class="t"><b>重做今天</b><span>清空今日记录，完整再做一遍</span></div>'+
+  '<button class="btn o sm" data-act="redoToday">重做</button></div></div>';
  h+='<div class="sec-t">奖励市场</div><div class="card">'+
   (st.rewards.length?st.rewards.map((r,i)=>'<div class="list-item"><div class="t"><b>'+esc(r.name)+'</b><span>'+r.cost+' ⭐</span></div>'+
    '<button class="btn o sm" data-act="delReward" data-i="'+i+'">删除</button></div>').join(''):'<div class="empty" style="padding:14px">还没有兑换项</div>')+
@@ -1662,6 +1677,12 @@ document.addEventListener('click',function(e){
    modal('<h3>⚠️ 清空全部数据</h3><p>打卡、星星、勋章、相册都会被删除，且无法恢复。建议先导出备份。</p>'+
     '<div class="mbtns"><button class="btn o" data-act="mClose">取消</button><button class="btn gray" data-act="wipe2">确认清空</button></div>');break;}
   case 'wipe2':{localStorage.removeItem(LS);location.reload();break;}
+  case 'redoToday':{
+   modal('<h3>🔄 重做今天</h3><p>清空今天的打卡记录，并把今天新学的单词退回「未学」状态，可以完整再走一遍。<br><span style="color:var(--muted);font-size:13px">星星和勋章不会退回。</span></p>'+
+    '<div class="mbtns"><button class="btn o" data-act="mClose">取消</button><button class="btn" data-act="redoToday2">确认重做</button></div>');break;}
+  case 'redoToday2':{
+   const n=resetToday();modalClose();render();
+   setTimeout(()=>toast('已清空今天（回滚 '+n+' 个新词），可以重新开始了'),300);break;}
   case 'addExam':{
    modal('<h3>记录模考成绩</h3><div class="fld"><label>日期</label><input type="date" id="eD" value="'+today()+'"></div>'+
     '<div class="fld"><label>分数（Cambridge Scale 100-150）</label><input type="number" id="eS" value="120"></div>'+
@@ -1739,7 +1760,25 @@ document.addEventListener('change',e=>{
 let deferredPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;});
 window.addEventListener('appinstalled',()=>{deferredPrompt=null;toast('已添加到主屏 🎉');});
-if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});}
+/* 检测到新版本就自动刷新一次（用 sessionStorage 防死循环）。
+   不然平板上会一直开着旧页面，改了代码也看不到。 */
+if('serviceWorker' in navigator){
+ window.addEventListener('load',()=>{
+  navigator.serviceWorker.register('sw.js').then(reg=>{
+   if(!reg)return;
+   reg.addEventListener('updatefound',()=>{
+    const nw=reg.installing;if(!nw)return;
+    nw.addEventListener('statechange',()=>{
+     if(nw.state==='installed'&&navigator.serviceWorker.controller){
+      if(sessionStorage.getItem('sw_reloaded')==='1')return;
+      sessionStorage.setItem('sw_reloaded','1');
+      try{location.reload();}catch(e){}
+     }
+    });
+   });
+  }).catch(()=>{});
+ });
+}
 
 /* ---------- 首启引导 ---------- */
 function firstRun(){
@@ -1761,6 +1800,20 @@ function checkSpecials(){
  const got=Array.from({length:18},(_,i)=>st.badges['m'+(i+1)]).filter(Boolean).length;
  if(got>=18&&!st.badges.s_all){st.badges.s_all=true;save();confetti(60);celebrate('萌宠全家福！','18 只全部集齐 🌈');}
 }
+/* ?redo=1 扫码进来清一次今日记录（用完立刻把参数抹掉，
+   否则添加到桌面后每次打开都会清一遍） */
+(function(){
+ try{
+  const u=new URL(location.href);
+  if(u.searchParams.get('redo')==='1'){
+   const n=resetToday();
+   u.searchParams.delete('redo');
+   history.replaceState(null,'',u.pathname+u.search+u.hash);
+   render();
+   setTimeout(()=>toast('今天的记录已清空（回滚 '+n+' 个新词），可以重新做一遍了'),600);
+  }
+ }catch(e){}
+})();
 render();
 loadVoices();
 checkSpecials();

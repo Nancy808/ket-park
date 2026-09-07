@@ -1,7 +1,11 @@
 /* 英语萌宠乐园 Service Worker
    改动 VER 版本号 → 平板自动更新
-   策略：核心文件预缓存；音频按需缓存（不拖慢首次安装） */
-const VER = 'ket-park-v1.7.1';
+
+   策略（v1.8 改）：
+   - 页面 / JS / 数据  → 网络优先（network-first），改完立刻生效；断网回落缓存
+   - 音频              → 缓存优先，首次取回后离线可用（80MB，不能每次走网络）
+   - Range 请求        → 直接走网络（音频 seek） */
+const VER = 'ket-park-v1.8.0';
 const ASSETS = [
   './',
   './index.html',
@@ -57,19 +61,18 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  /* 其他：缓存优先 + 后台更新 */
+  /* 页面 / JS / 数据：网络优先。
+     之前是缓存优先，导致改完代码平板上还是旧版本 —— 已修。
+     断网时自动回落缓存，离线照样能用。 */
   e.respondWith(
-    caches.match(req).then(hit => {
-      const net = fetch(req)
-        .then(res => {
-          if (res && res.status === 200 && res.type === 'basic') {
-            const copy = res.clone();
-            caches.open(VER).then(c => c.put(req, copy).catch(() => {}));
-          }
-          return res;
-        })
-        .catch(() => hit);
-      return hit || net;
-    })
+    fetch(req)
+      .then(res => {
+        if (res && res.status === 200 && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(VER).then(c => c.put(req, copy).catch(() => {}));
+        }
+        return res;
+      })
+      .catch(() => caches.match(req).then(hit => hit || caches.match('./index.html')))
   );
 });
