@@ -1800,18 +1800,33 @@ function checkSpecials(){
  const got=Array.from({length:18},(_,i)=>st.badges['m'+(i+1)]).filter(Boolean).length;
  if(got>=18&&!st.badges.s_all){st.badges.s_all=true;save();confetti(60);celebrate('萌宠全家福！','18 只全部集齐 🌈');}
 }
-/* ?redo=1 扫码进来清一次今日记录（用完立刻把参数抹掉，
-   否则添加到桌面后每次打开都会清一遍） */
+/* URL 参数入口（用完立刻抹掉参数，否则加到桌面后每次打开都会再执行一次）
+   ?redo=1  清空今天的打卡记录，今天新学的词退回「未学」
+   ?nosw=1  注销 Service Worker + 清掉全部缓存（解决平板上一直看到旧版本）
+   两个一起用 = 彻底刷新：清缓存 + 清今日 + 重载 */
 (function(){
  try{
   const u=new URL(location.href);
-  if(u.searchParams.get('redo')==='1'){
-   const n=resetToday();
-   u.searchParams.delete('redo');
-   history.replaceState(null,'',u.pathname+u.search+u.hash);
-   render();
-   setTimeout(()=>toast('今天的记录已清空（回滚 '+n+' 个新词），可以重新做一遍了'),600);
+  const redo=u.searchParams.get('redo')==='1';
+  const nosw=u.searchParams.get('nosw')==='1';
+  if(!redo&&!nosw)return;
+  let n=0;
+  if(redo)n=resetToday();
+  u.searchParams.delete('redo');u.searchParams.delete('nosw');
+  history.replaceState(null,'',u.pathname+u.search+u.hash);
+  render();
+  if(nosw){
+   const done=()=>{try{location.reload();}catch(e){}};
+   Promise.resolve()
+    .then(()=>navigator.serviceWorker?navigator.serviceWorker.getRegistrations():[])
+    .then(rs=>Promise.all((rs||[]).map(r=>{try{return r.unregister();}catch(e){return null;}})))
+    .then(()=>window.caches?caches.keys():[])
+    .then(ks=>Promise.all((ks||[]).map(k=>{try{return caches.delete(k);}catch(e){return null;}})))
+    .then(done).catch(done);
+   setTimeout(done,2500);   // 兜底：万一上面卡住也强制重载
+   return;
   }
+  setTimeout(()=>toast('今天的记录已清空（回滚 '+n+' 个新词），可以重新做一遍了'),600);
  }catch(e){}
 })();
 render();
