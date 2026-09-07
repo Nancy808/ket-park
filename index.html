@@ -397,7 +397,9 @@ function dayCount(m){return Object.keys(st.day).filter(k=>moduleOf(k)===m&&st.da
 function checkMonthly(){
  const m=moduleOf(today());const rec=st.monthly[m]||(st.monthly[m]={passed:false});
  if(rec.passed)return;
- const need=20;
+ /* M1 从 9/7 才开始（比月初晚 6 天），当月只剩 24 天，门槛放宽到 18 天，
+    否则第一枚勋章就可能因"天数不够"拿不到，打击孩子。M2 起恢复 20 天。 */
+ const need=(m===1?18:20);
  if(dayCount(m)>=need){
   rec.passed=true;rec.at=today();
   st.badges['m'+m]=true;st.msgs[m]=true;st.stars+=10;save();
