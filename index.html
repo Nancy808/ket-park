@@ -374,7 +374,7 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.10.0';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.10.1';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
@@ -2160,10 +2160,40 @@ function checkSpecials(){
   setTimeout(()=>toast('今天的记录已清空（回滚 '+n+' 个新词），可以重新做一遍了'),600);
  }catch(e){}
 })();
-render();
-loadVoices();
-checkSpecials();
-firstRun();
+
+/* ---------- 白屏自救：任何一步出错都给出可读提示 + 自救按钮，而不是一片白 ---------- */
+function fatalBox(msg,err){
+ try{
+  var lsOK='可写入';try{localStorage.setItem('__t','1');localStorage.removeItem('__t');}catch(e){lsOK='不可写入（无痕模式 / 隐私模式？）';}
+  var v=document.getElementById('view');
+  if(v)v.innerHTML='<div class="card" style="text-align:center;padding:22px 16px">'+
+   '<div style="font-size:34px">🛠️</div>'+
+   '<h3 style="margin:8px 0 6px">页面没能正常打开</h3>'+
+   '<div class="tiny muted" style="margin-bottom:10px">'+esc(msg)+'</div>'+
+   '<div style="font-size:11px;color:#999;word-break:break-all;text-align:left;background:#F6F4F1;padding:8px;border-radius:8px">'+
+    esc(err?String(err.message||err):'无')+'</div>'+
+   '<button class="btn block" style="margin-top:14px" data-act="forceUpdate2">🔄 清缓存重新加载</button>'+
+   '<a class="btn o block" style="margin-top:8px;text-decoration:none" href="./index.html?nosw=1">用安全模式打开（清 SW）</a>'+
+   '<div class="tiny muted" style="margin-top:10px;line-height:1.7">版本 '+(typeof APP_VER!=='undefined'?APP_VER:'?')+
+    ' · 数据 '+(typeof window.WORDS!=='undefined'?'已加载':'<b style="color:#C0392B">没加载</b>')+
+    ' · 存储 '+lsOK+'</div>'+
+   '<div class="tiny muted" style="margin-top:8px;line-height:1.7">数据没加载 = 只拷了 index.html 一个文件。请把整个文件夹（含 data/ 和 audio/）一起拷贝。</div>'+
+   '</div>';
+ }catch(e){}
+}
+window.addEventListener('error',function(e){
+ try{var v=document.getElementById('view');if(v&&!v.innerHTML.trim())fatalBox('脚本运行出错（页面空白）',e.error||e.message);}catch(_){}
+});
+if(typeof window.WORDS==='undefined'){
+ /* 数据文件缺失：继续跑只会白屏，直接给明确提示 */
+ fatalBox('数据文件没加载：index.html 必须和 data/ 文件夹放在一起','window.WORDS is undefined');
+}else{
+ try{
+  render();loadVoices();checkSpecials();firstRun();
+  var _v=document.getElementById('view');
+  if(_v&&!_v.innerHTML.trim())fatalBox('页面渲染为空','render() 没有输出内容');
+ }catch(e){fatalBox('初始化出错',e);}
+}
 setInterval(()=>{const k=today();if(window._lastDay!==k){window._lastDay=k;render();}},60000);
 window._lastDay=today();
 </script>
