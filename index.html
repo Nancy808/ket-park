@@ -232,6 +232,7 @@ input,textarea{font-family:inherit;font-size:16px;color:var(--text)}
 <script src="data/readers_easy.js"></script>
 <script src="data/readers_more.js"></script>
 <script src="data/readers.js"></script>
+<script src="data/exam.js"></script>
 <script>
 /* =========================================================
    英语萌宠乐园  v1.0.0
@@ -322,14 +323,21 @@ const RANKS=[
 const DEF=()=>({v:1,ver:VERSION,name:'',start:START,stars:0,streak:0,best:0,lastDay:null,
  day:{},words:{},badges:{},msgs:{},diary:[],album:{},goal:'',level:null,levelLock:false,
  quiz:[],lotto:{chances:0,history:[]},rewards:[],pin:'1234',weekAward:{},speak:{streak:0,best:0,last:null,min:0},
+ wrongBook:{},sents:[],examLog:{},writing:[],profiles:null,kid:null,
  shields:{cards:2,leaveUntil:''},monthly:{},exam:[],ttsOK:null,created:new Date().toISOString(),
  voice:'maisie',audio:true,pitch:1.25,voiceSet:0});
 let st=load();
-function load(){try{const r=JSON.parse(localStorage.getItem(LS));if(r&&r.v===1){const o=Object.assign(DEF(),r);
+/* 多孩子：每个孩子一套独立数据（key 加后缀），互不影响 */
+function curKid(){try{return localStorage.getItem('ket_park_cur')||'';}catch(e){return '';}}
+function lsKey(){const k=curKid();return LS+(k?'_'+k:'');}
+function kidList(){try{return JSON.parse(localStorage.getItem('ket_park_profiles')||'[]');}catch(e){return [];}}
+function saveKids(l){try{localStorage.setItem('ket_park_profiles',JSON.stringify(l));}catch(e){}}
+function kidName(){const k=curKid();const p=kidList().filter(x=>x.id===k)[0];return p?p.name:(st.name||'宝贝');}
+function load(){try{const r=JSON.parse(localStorage.getItem(lsKey()));if(r&&r.v===1){const o=Object.assign(DEF(),r);
   if(!o.voiceSet&&o.voice==='ana'){o.voice='maisie';o.voiceSet=1;}  /* 一次性迁到 Maisie 童声 */
   return o;}}catch(e){}const d=DEF();d.voiceSet=1;return d;}
 let saveT=null;
-function save(){clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem(LS,JSON.stringify(st));}catch(e){toast('存储空间不足，请在家长端导出备份');}},120);}
+function save(){clearTimeout(saveT);saveT=setTimeout(()=>{try{localStorage.setItem(lsKey(),JSON.stringify(st));}catch(e){toast('存储空间不足，请在家长端导出备份');}},120);}
 
 /* ---------- utils ---------- */
 const pad=n=>String(n).padStart(2,'0');
@@ -374,7 +382,7 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.10.1';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.11.0';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
@@ -739,6 +747,26 @@ function grade(id,ok){const r=wr(id);r.intro=true;r.seen++;
  if(ok){r.reps++;r.iv=r.iv===0?1:(r.iv===1?3:Math.min(30,Math.round(r.iv*r.ef)));r.ef=Math.min(2.8,r.ef+0.1);}
  else{r.wrong++;r.iv=1;r.reps=0;r.ef=Math.max(1.3,r.ef-0.2);}
  r.due=addDays(today(),r.iv);}
+
+/* ---------- 错词本：背词答错 / 听写拼错 / 小测做错，自动收进来 ---------- */
+function addWrong(id,src){if(!id)return;if(!st.wrongBook)st.wrongBook={};
+ const e=st.wrongBook[id]||(st.wrongBook[id]={n:0,ok:0,last:'',src:src||'vocab'});
+ e.n++;e.last=today();if(!e.src)e.src=src||'vocab';
+ if(!st.badges.s_wb_unlocked){st.badges.s_wb_unlocked=true;save();}}   /* 收过错词才有资格拿「错词清零」 */
+function delWrong(id){if(st.wrongBook)delete st.wrongBook[id];}
+function wrongList(){return Object.keys(st.wrongBook||{}).map(id=>({id:id,r:st.wrongBook[id],w:wById(id)}))
+ .filter(x=>x.w).sort((a,b)=>(b.r.n-b.r.n)||((a.r.last||'').localeCompare(b.r.last||'')));}
+function totalWords(){if(window._tw==null){let n=0;for(let m=1;m<=18;m++)n+=mWords(m).length;window._tw=n;}return window._tw;}
+function knownWords(){return Object.keys(st.words).filter(id=>{const r=st.words[id];return r&&r.intro&&r.reps>=2;}).length;}
+function touchedWords(){return Object.keys(st.words).filter(id=>st.words[id]&&st.words[id].intro).length;}
+/* ---------- 句子回流：口语 / 日记里学会的句子，第二天回来读一遍 ---------- */
+function addSents(arr,src){
+ if(!st.sents)st.sents=[];
+ (arr||[]).forEach(t=>{t=String(t||'').trim();if(t)st.sents.push({d:today(),t:t,src:src||'speak',rev:false});});
+ if(st.sents.length>400)st.sents=st.sents.slice(-400);
+}
+function pendingSents(){return (st.sents||[]).filter(s=>!s.rev&&s.d&&s.d<today()).slice(-6);}
+let wb={ids:[],i:0,ok:0,total:0,cur:null};
 /* ---------- 重做今天：清今日打卡记录 + 回滚今天新学的词，可以完整再走一遍 ---------- */
 function resetToday(){
  const k=today();const d=st.day[k];let rolled=0;
@@ -792,6 +820,9 @@ const SPECIALS=[
  {id:'s_100',name:'百日坚持',icon:'🔥',how:'连续打卡 100 天'},
  {id:'s_bday',name:'生日特别章',icon:'🎂',how:'生日当天打开'},
  {id:'s_cny',name:'春节特别章',icon:'🧧',how:'春节期间打卡'},
+ {id:'s_wb',name:'错词清零',icon:'🧹',how:'把错词本练到空'},
+ {id:'s_spk7',name:'口语小达人',icon:'🗣️',how:'口语连续打卡 7 天'},
+ {id:'s_spk30',name:'口语小主播',icon:'🎙️',how:'口语连续打卡 30 天'},
  {id:'s_ket',name:'KET 通过',icon:'🏆',how:'KET 考试成绩达标后家长端解锁'},
  {id:'s_all',name:'萌宠全家福',icon:'🌈',how:'集齐 18 枚月度勋章'}
 ];
@@ -857,6 +888,17 @@ function vHome(){
    (spkR?'看记录 / 再练一次':(sp.on?'开始':'今天也想练'))+'</button>'+
   '<div class="tiny muted" style="margin-top:8px">本月口语打卡 '+speakCount(m)+' 天 · 累计 '+Math.round(speakMonthSec(m)/60)+' 分钟'+
   (st.speak&&st.speak.streak?' · 连续 '+st.speak.streak+' 天':'')+'</div></div>';
+ const wnN=wrongList().length,psN=pendingSents().length;
+ h+='<div class="card" style="margin-top:12px"><div class="spread">'+
+  '<div><b>📕 错词本</b><div class="tiny muted">'+(wnN?(wnN+' 个词要攻克'):'还没有错词，很棒')+
+  (psN?(' · '+psN+' 句话等你复习'):'')+'</div></div>'+
+  '<button class="btn sm" data-act="wbOpen">'+(wnN?'去练习':'看看')+'</button></div>'+
+  '<div class="tiny muted" style="margin-top:8px">背词答错、听写拼错、小测做错的词自动收进来，连对 2 次才放走。</div></div>';
+ const lg=st.examLog||{};const lgN=Object.keys(lg).map(k=>lg[k].length).reduce((x,y)=>x+y,0);
+ h+='<div class="card" style="margin-top:12px"><div class="spread">'+
+  '<div><b>🎯 技能训练</b><div class="tiny muted">真题题型 · 阅读 / 写作 / 听力'+(lgN?(' · 已练 '+lgN+' 次'):'')+'</div></div>'+
+  '<button class="btn sm" data-act="skill">开始</button></div>'+
+  '<div class="tiny muted" style="margin-top:8px">'+skillRec().t+'。不影响每日打卡，想练就练。</div></div>';
  if(done>0){
   h+='<div class="card" style="margin-top:12px"><div class="spread">'+
    '<div><b>📋 今日战绩</b><div class="tiny muted">看看今天背了哪些词、跟读得几分</div></div>'+
@@ -1003,6 +1045,16 @@ function vMe(){
   return '<div class="list-item"><div class="t"><b>'+esc(r.name)+'</b><span>'+r.cost+' ⭐'+(can?' · 可以兑换啦':(' · 还差 '+(r.cost-st.stars)+' ⭐'))+'</span></div>'+
    (can?'<button class="btn sm" data-act="redeem" data-i="'+st.rewards.indexOf(r)+'">兑换</button>':'<span class="pill y">攒星中</span>')+'</div>';
  }).join(''):'<div class="empty">家长端可以添加兑换项</div>')+'</div>';
+ h+='<div class="sec-t">学习进度</div>';
+ const tw=totalWords()||1,kw=knownWords(),tc=touchedWords();
+ h+='<div class="card">'+
+  '<div class="spread"><b>单词量</b><span>'+kw+' / '+tw+' 掌握</span></div>'+
+  '<div class="bar" style="margin-top:8px"><i style="width:'+Math.min(100,kw/tw*100).toFixed(1)+'%"></i></div>'+
+  '<div class="tiny muted" style="margin-top:6px">已学过 '+tc+' 词 · 「掌握」= 学过且连续答对 2 次以上</div>'+
+  '<div class="list-item" style="margin-top:10px"><div class="t"><b>📕 错词本</b><span>'+wrongList().length+' 个词待攻克</span></div>'+
+   '<button class="btn o sm" data-act="wbOpen">去练习</button></div>'+
+  '<div class="list-item"><div class="t"><b>💬 口语</b><span>连续 '+(st.speak&&st.speak.streak||0)+' 天 · 累计 '+(st.speak&&st.speak.min||0)+' 分钟 · 最长 '+(st.speak&&st.speak.best||0)+' 天</span></div></div>'+
+  '</div>';
  h+='<div class="sec-t">朗读声音</div>';
  h+='<div class="card">'+VOICE_OPT.map(v=>
    '<div class="list-item"><div class="t"><b>'+v.name+'</b><span>'+v.desc+'</span></div>'+
@@ -1184,6 +1236,7 @@ function speakSave(){
  const d=getDay(),old=d.tasks.speak;
  const dur=(old&&old.dur||0)+spk.secs;
  finishTask('speak',{dur:dur,tpl:spk.tpl,rate:spk.rate,sents:sents.length?sents:((old&&old.sents)||[])});
+ addSents(sents,'speak');
  const t=d.tasks.speak;
  if(!old||!old.starred){t.starred=true;st.stars+=1;}
  st.speak=st.speak||{streak:0,best:0,last:null,min:0};
@@ -1193,6 +1246,332 @@ function speakSave(){
  st.speak.min=(st.speak.min||0)+Math.round(spk.secs/60);
  spk.again=false;
  save();ovClose();confetti(24);celebrate('口语打卡完成！','💬 +1 ⭐ · 今日 '+Math.round(dur/60)+' 分钟');
+}
+
+/* ---------- 📕 错词本：错过的词自动收进来，连对 2 次才放走 ---------- */
+function taskWrongBook(){
+ const list=wrongList();
+ if(!list.length){
+  ov('📕 错词本','<div class="wcard" style="text-align:center"><div style="font-size:40px">🎉</div>'+
+   '<div style="font-size:19px;font-weight:800;margin-top:6px">错词本是空的</div>'+
+   '<div class="tiny muted" style="margin-top:6px">背词答错、听写拼错、小测做错的词会自动收进来</div>'+
+   '<button class="btn block" style="margin-top:18px" data-act="ovClose">知道啦</button></div>','',0);return;}
+ let h='<div class="wcard" style="text-align:center"><div style="font-size:34px">📕</div>'+
+  '<div style="font-size:20px;font-weight:800;margin-top:4px">'+list.length+' 个词要攻克</div>'+
+  '<div class="tiny muted" style="margin-top:4px">特训里连对 2 次，这个词才放走</div>'+
+  '<button class="btn block" style="margin-top:14px" data-act="wbPlay">开始错词特训（抽 10 个）</button></div>';
+ h+='<div class="sec-t">错词清单</div><div class="card" style="padding:12px 14px">';
+ list.slice(0,50).forEach(x=>{
+  h+='<div class="list-item"><div class="t"><b>'+esc(x.w.w)+'</b><span>'+esc(x.w.cn||'')+' · 错 '+x.r.n+' 次'+
+   (x.r.src==='dic'?' · 拼写':'')+(x.r.ok?' · 已连对 '+x.r.ok+' 次':'')+'</span></div>'+
+   '<span><button class="btn o sm" data-act="spk" data-t="'+esc(x.w.w)+'">🔊</button> '+
+   '<button class="btn o sm" data-act="wbRemove" data-id="'+esc(x.id)+'">会了</button></span></div>';});
+ h+='</div>';
+ ov('📕 错词本',h,'',0);
+}
+function wbPlay(){
+ const list=wrongList().slice(0,10);
+ if(!list.length){toast('错词本是空的');return;}
+ wb={ids:shuffle(list.map(x=>x.id)),i:0,ok:0,total:0,cur:null};
+ ov('📕 错词特训','','',5);wbStep();
+}
+function wbStep(){
+ if(!wb.ids.length||wb.i>=wb.ids.length){
+  save();
+  ovBodySet('<div class="wcard" style="text-align:center"><div style="font-size:40px">💪</div>'+
+   '<div style="font-size:19px;font-weight:800;margin-top:6px">这轮答对 '+wb.ok+' / '+wb.total+'</div>'+
+   '<div class="tiny muted" style="margin-top:6px">错词本还剩 '+wrongList().length+' 个</div>'+
+   '<button class="btn block" style="margin-top:16px" data-act="wbOpen">回到错词本</button></div>');return;}
+ const id=wb.ids[wb.i],w=wById(id);if(!w){wb.i++;return wbStep();}
+ const m=moduleOf(today());
+ const opts=shuffle([w.w].concat(shuffle(mWords(m).map(x=>x.w).filter(x=>x!==w.w)).slice(0,3)));
+ wb.cur={id:id,ans:opts.indexOf(w.w),answered:false};
+ ovBodySet('<div class="tiny muted" style="text-align:center;margin-bottom:10px">错词 '+(wb.i+1)+' / '+wb.ids.length+'</div>'+
+  '<div class="wcard"><div class="tiny muted" style="margin-bottom:8px">「'+esc(w.cn||'')+'」是哪个词？</div>'+
+  '<button class="spk" data-act="spk" data-t="'+esc(w.w)+'">🔊</button></div>'+
+  '<div class="card">'+opts.map((o,i)=>'<button class="opt" data-act="wbPick" data-i="'+i+'">'+esc(o)+'</button>').join('')+'</div>');
+}
+
+/* =========================================================
+   🎯 技能训练：KET 真题题型（阅读 Part1/2 · 写作 Part6/7 · 听力笔记填空）
+   ========================================================= */
+const EX=window.EXAM||{read1:[],read2:[],write6:[],write7:[],list2:[]};
+let ex={type:'',set:null,i:0,ok:0,total:0,ans:[]};
+function skillRec(){
+ const m=moduleOf(today());
+ if(m>=4&&m<=8)return {k:'read',t:'本月是阅读季，先练阅读 Part 1 / Part 2'};
+ if(m>=9&&m<=10)return {k:'write',t:'本月是写作季，先练写邮件和看图故事'};
+ if(m===11)return {k:'listen',t:'本月是听力季，先练笔记填空'};
+ if(m>=12)return {k:'read',t:'冲刺阶段，哪项弱就练哪项'};
+ return {k:'any',t:'现在打基础阶段，想提前玩玩也可以'};
+}
+function skillMenu(){
+ const rec=skillRec().k;
+ const items=[
+  {k:'read1',n:'阅读 Part 1 标识 / 短信',d:'6 题 · 看短文本选主旨',icon:'📕',n0:EX.read1.length},
+  {k:'read2',n:'阅读 Part 2 三短文匹配',d:'7 题 · A / B / C 三选一',icon:'📗',n0:EX.read2.length},
+  {k:'write6',n:'写作 Part 6 邮件 / 便条',d:'25 词 · 三个要点写全',icon:'✉️',n0:EX.write6.length},
+  {k:'write7',n:'写作 Part 7 看图故事',d:'35 词 · 三幅图串成故事',icon:'🖼️',n0:EX.write7.length},
+  {k:'list2',n:'听力 Part 2 笔记填空',d:'5 空 · 抓数字、日期、价格',icon:'🎧',n0:EX.list2.length}
+ ];
+ let h='<div class="wcard" style="text-align:center"><div style="font-size:32px">🎯</div>'+
+  '<div style="font-size:17px;font-weight:800;margin-top:4px">KET 真题题型训练</div>'+
+  '<div class="tiny muted" style="margin-top:4px">'+skillRec().t+'</div></div>';
+ h+='<div class="sec-t">选一项</div><div class="card" style="padding:12px 14px">';
+ items.forEach(it=>{
+  const hot=(rec==='any'||(rec==='read'&&it.k.indexOf('read')===0)||(rec==='write'&&it.k.indexOf('write')===0)||(rec==='listen'&&it.k==='list2'));
+  h+='<div class="list-item"><div class="t"><b>'+it.icon+' '+it.n+'</b><span>'+it.d+' · 共 '+it.n0+' 套'+(hot?' · <b style="color:var(--peach-d)">推荐</b>':'')+'</span></div>'+
+   '<button class="btn '+(hot?'':'o ')+'sm" data-act="skPick" data-k="'+it.k+'">开始</button></div>';
+ });
+ h+='</div>';
+ const lg=st.examLog||{};const ns=Object.keys(lg).map(k=>lg[k].length).reduce((a,b)=>a+b,0);
+ h+='<div class="tiny muted" style="margin-top:10px;text-align:center">已练 '+ns+' 次 · 不影响每日打卡，随时可以练</div>';
+ ov('🎯 技能训练',h,'',0);
+}
+function exLog(type,score,n){if(!st.examLog)st.examLog={};const a=st.examLog[type]||(st.examLog[type]=[]);
+ a.push({d:today(),s:score,n:n});if(a.length>60)a.shift();save();}
+function exStart(type){
+ ex={type:type,set:null,i:0,ok:0,total:0,ans:[]};
+ const pool=({read1:EX.read1,read2:EX.read2,write6:EX.write6,write7:EX.write7,list2:EX.list2})[type]||[];
+ if(!pool.length){toast('素材还没准备好');return;}
+ const done=(st.examLog&&st.examLog[type]||[]).length;
+ ex.set=pool[done%pool.length];
+ ({read1:exR1,read2:exR2,write6:exW6,write7:exW7,list2:exL2})[type]();
+}
+function exResult(score,total,title,tip){
+ const pct=total?Math.round(score/total*100):0;
+ exLog(ex.type,pct,total);
+ ovBodySet('<div class="wcard" style="text-align:center"><div style="font-size:42px">'+(pct>=85?'🌟':(pct>=70?'👍':'💪'))+'</div>'+
+  '<div style="font-size:24px;font-weight:900;margin-top:6px">'+score+' / '+total+'</div>'+
+  '<div class="tiny muted" style="margin-top:6px">'+tip+'</div>'+
+  '<button class="btn block" style="margin-top:16px" data-act="skill">再练一项</button>'+
+  '<button class="btn o block" style="margin-top:8px" data-act="ovClose">返回今日</button></div>');
+ confetti(pct>=70?26:10);
+}
+/* ---- 阅读 Part 1 ---- */
+function exR1(){
+ const s=ex.set;
+ if(ex.i>=s.qs.length)return exResult(ex.ok,s.qs.length,'','做错的题目明天再来看一遍');
+ const q=s.qs[ex.i];
+ ov('📕 阅读 Part 1','','',6);
+ ovBodySet('<div class="tiny muted" style="text-align:center;margin-bottom:10px">第 '+(ex.i+1)+' / '+s.qs.length+' 题</div>'+
+  '<div class="card" style="padding:14px"><div style="background:#F6F4F1;border-radius:12px;padding:12px;font-size:15px;line-height:1.6;border-left:4px solid #E0A06A">'+esc(q.t)+'</div>'+
+  '<div style="font-weight:700;margin-top:12px">'+esc(q.q)+'</div></div>'+
+  '<div class="card">'+q.o.map((o,i)=>'<button class="opt" data-act="r1Pick" data-i="'+i+'">'+esc(o)+'</button>').join('')+'</div>');
+}
+/* ---- 阅读 Part 2 ---- */
+function exR2(){
+ const s=ex.set;
+ if(ex.i>=s.qs.length)return exResult(ex.ok,s.qs.length,'','匹配题是 KET 的拉分题，多练几次');
+ const q=s.qs[ex.i];
+ ov('📗 阅读 Part 2','','',7);
+ ovBodySet('<div class="tiny muted" style="text-align:center;margin-bottom:8px">第 '+(ex.i+1)+' / '+s.qs.length+' 题 · '+esc(s.topic)+'</div>'+
+  '<div class="card" style="padding:12px 14px;max-height:190px;overflow:auto">'+
+   '<div class="tiny muted" style="margin-bottom:6px">三篇短文</div>'+
+   s.texts.map(t=>'<div style="margin-bottom:8px"><b>'+t.k+'. </b><span style="font-size:13px;line-height:1.6">'+esc(t.t)+'</span></div>').join('')+
+  '</div>'+
+  '<div class="card" style="margin-top:10px"><div style="font-weight:700;margin-bottom:10px">'+esc(q.q)+'</div>'+
+   s.texts.map((t,i)=>'<button class="opt" data-act="r2Pick" data-i="'+i+'">'+t.k+'</button>').join('')+'</div>');
+}
+/* ---- 写作 Part 6 / 7：写完自查，家长端能看 ---- */
+function exW6(){
+ const s=ex.set;
+ ov('✉️ 写作 Part 6','','',8);
+ ovBodySet('<div class="card" style="padding:14px">'+
+  '<div class="tiny muted">写给：'+esc(s.to)+'</div>'+
+  '<div style="margin-top:6px;font-size:15px;line-height:1.6">'+esc(s.situation)+'</div></div>'+
+  '<div class="card" style="padding:12px 14px"><b>三个要点都要写到</b>'+
+   s.pts.map((p,i)=>'<div class="tiny" style="margin-top:6px">'+(i+1)+'. '+esc(p)+'</div>').join('')+'</div>'+
+  '<div class="card" style="padding:12px 14px">'+
+   '<textarea id="wIn" rows="6" placeholder="Hi ... ," style="width:100%;padding:12px;border:2px solid var(--line);border-radius:12px;font-size:15px;line-height:1.6"></textarea>'+
+   '<div class="tiny muted" id="wCount" style="margin-top:6px">0 词 · 需要 25 词以上</div>'+
+   '<button class="btn block" style="margin-top:10px" data-act="wSubmit" data-k="write6">我写好了</button></div>');
+ const ta=document.getElementById('wIn');
+ if(ta)ta.oninput=function(){const n=(ta.value||'').trim().split(/\s+/).filter(Boolean).length;
+  const e=document.getElementById('wCount');if(e){e.innerHTML=n+' 词 · '+(n>=25?'<b style="color:#3E8E5A">够了</b>':'还差 '+(25-n)+' 词');}};
+}
+function exW7(){
+ const s=ex.set;
+ ov('🖼️ 写作 Part 7','','',8);
+ ovBodySet('<div class="card" style="padding:12px 14px"><b>三幅图讲了什么</b>'+
+   s.pics.map((p,i)=>'<div style="margin-top:8px"><span class="pill b">图 '+(i+1)+'</span>'+
+    '<div style="font-size:14px;line-height:1.6;margin-top:4px">'+esc(p)+'</div></div>').join('')+'</div>'+
+  '<div class="card" style="padding:12px 14px">'+
+   '<textarea id="wIn" rows="7" placeholder="One day ..." style="width:100%;padding:12px;border:2px solid var(--line);border-radius:12px;font-size:15px;line-height:1.6"></textarea>'+
+   '<div class="tiny muted" id="wCount" style="margin-top:6px">0 词 · 需要 35 词以上</div>'+
+   '<div class="tiny muted" style="margin-top:4px">小提示：用 and / then / because 把三幅图连起来。</div>'+
+   '<button class="btn block" style="margin-top:10px" data-act="wSubmit" data-k="write7">我写好了</button></div>');
+ const ta=document.getElementById('wIn');
+ if(ta)ta.oninput=function(){const n=(ta.value||'').trim().split(/\s+/).filter(Boolean).length;
+  const e=document.getElementById('wCount');if(e){e.innerHTML=n+' 词 · '+(n>=35?'<b style="color:#3E8E5A">够了</b>':'还差 '+(35-n)+' 词');}};
+}
+function writeSubmit(kind){
+ const t=(document.getElementById('wIn').value||'').trim();
+ const n=t.split(/\s+/).filter(Boolean).length;
+ const need=kind==='write7'?35:25;
+ if(n<8){toast('再写长一点');return;}
+ const tips=[];
+ if(n<need)tips.push('还差 '+(need-n)+' 词到考试要求');
+ else tips.push('字数达标（'+n+' 词）');
+ if(!/[.!?]$/.test(t))tips.push('结尾记得加句号');
+ if(t[0]&&t[0]!==t[0].toUpperCase())tips.push('第一句话首字母要大写');
+ if(!/\b(and|then|because|so|but)\b/i.test(t))tips.push('试试用 and / then / because 连句子');
+ if(!st.writing)st.writing=[];
+ st.writing.push({d:today(),kind:kind,tip:ex.set?ex.set.id:'',text:t,words:n});
+ if(st.writing.length>80)st.writing.shift();
+ exLog(kind,n>=need?100:Math.round(n/need*100),1);
+ save();
+ ovBodySet('<div class="wcard" style="text-align:center"><div style="font-size:38px">✍️</div>'+
+  '<div style="font-size:19px;font-weight:800;margin-top:6px">'+n+' 词</div>'+
+  '<div class="card" style="margin-top:12px;text-align:left">'+tips.map(x=>'<div class="tiny" style="line-height:1.8">· '+esc(x)+'</div>').join('')+'</div>'+
+  '<div class="tiny muted" style="margin-top:10px">作文已保存，家长端「本周写作」能看到</div>'+
+  '<button class="btn block" style="margin-top:14px" data-act="skill">再练一项</button>'+
+  '<button class="btn o block" style="margin-top:8px" data-act="ovClose">返回今日</button></div>');
+ confetti(16);
+}
+/* ---- 听力 Part 2 笔记填空 ---- */
+function exL2(){
+ const s=ex.set;
+ ov('🎧 听力 · 笔记填空','','',5);
+ exL2Body('');
+ setTimeout(()=>say(s.mono,0.8,{}),400);
+}
+function exL2Body(msg){
+ const s=ex.set;
+ let h='<div class="tiny muted" style="text-align:center;margin-bottom:10px">'+esc(s.title)+' · 听两遍，把空填上</div>';
+ h+='<div class="card" style="padding:12px 14px;text-align:center">'+
+  '<button class="btn o" data-act="l2Play">🔊 再听一遍</button>'+
+  '<div class="tiny muted" style="margin-top:8px">'+(msg||'播放中…')+'</div></div>';
+ h+='<div class="card" style="padding:12px 14px">';
+ s.notes.forEach((nt,i)=>{h+='<div style="margin-bottom:10px"><b style="font-size:14px">'+esc(nt.q)+'</b>'+
+  '<input id="ln'+i+'" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%;margin-top:5px;padding:10px 12px;border:2px solid var(--line);border-radius:11px;font-size:15px" placeholder="写下听到的内容"></div>';});
+ h+='<button class="btn block" style="margin-top:6px" data-act="l2Check">对答案</button></div>';
+ ovBodySet(h);
+}
+function l2Check(){
+ const s=ex.set;let ok=0;const res=[];
+ s.notes.forEach((nt,i)=>{
+  const el=document.getElementById('ln'+i);const v=(el?el.value||'':'').trim().toLowerCase();
+  const a=String(nt.a).toLowerCase();
+  const norm=x=>x.replace(/[^\w£.\s]/g,' ').replace(/\s+/g,' ').trim();
+  const A=norm(a),V=norm(v);
+  let good=false;
+  if(V&&(V===A||A.indexOf(V)>=0||V.indexOf(A)>=0))good=true;
+  /* 数字/日期容错：顺序换一下也算对 */
+  const aw=A.split(' ').sort().join(' '),vw=V.split(' ').sort().join(' ');
+  if(!good&&aw===vw)good=true;
+  if(good)ok++;
+  res.push({q:nt.q,a:nt.a,v:el?el.value:'',ok:good});
+ });
+ exLog('list2',Math.round(ok/s.notes.length*100),s.notes.length);
+ if(!st.examLog)st.examLog={};
+ ovBodySet('<div class="wcard" style="text-align:center"><div style="font-size:38px">'+(ok===s.notes.length?'🎉':(ok>=3?'👍':'💪'))+'</div>'+
+  '<div style="font-size:22px;font-weight:900;margin-top:6px">'+ok+' / '+s.notes.length+'</div></div>'+
+  '<div class="card" style="padding:12px 14px">'+res.map(r=>'<div style="margin-bottom:9px">'+
+   '<b style="font-size:13px">'+esc(r.q)+'</b> '+
+   '<span class="pill '+(r.ok?'g':'y')+'">'+esc(r.a)+'</span>'+
+   (r.ok?'':'<div class="tiny muted" style="margin-top:3px">你写的：'+esc(r.v||'（空）')+'</div>')+'</div>').join('')+
+  '<div class="tiny muted" style="margin-top:6px">数字、日期、价格是 KET 听力的高频丢分点，多听几遍就稳了。</div></div>'+
+  '<button class="btn block" style="margin-top:12px" data-act="skill">再练一项</button>'+
+  '<button class="btn o block" style="margin-top:8px" data-act="l2Again">这套再听一次</button>');
+ save();confetti(ok>=3?24:10);
+}
+
+/* =========================================================
+   📊 本周周报 + 👦👧 多孩子档案 / PK 榜
+   ========================================================= */
+function weekDigest(){
+ const wk=weekKey(today());
+ const days=Array.from({length:7},(_,i)=>addDays(wk,i));
+ let done=0,ot=0,vOk=0,vT=0,rs=[],lOk=0,spD=0,spS=0;
+ days.forEach(k=>{const d=st.day[k];if(!d||!d.doneAt)return;done++;if(d.onTime)ot++;
+  const t=d.tasks||{};
+  if(t.vocab){vOk+=t.vocab.correct||0;vT+=t.vocab.total||0;}
+  if(t.read&&t.read.score!=null)rs.push(t.read.score);
+  if(t.listen)lOk+=t.listen.ok||0;
+  if(t.speak&&t.speak.done){spD++;spS+=(t.speak.dur||0);}});
+ const weak=Object.keys(st.words).map(id=>({id:id,r:st.words[id],w:wById(id)}))
+  .filter(x=>x.w&&x.r.wrong>0).sort((a,b)=>b.r.wrong-a.r.wrong).slice(0,10).map(x=>x.w.w);
+ const lg=st.examLog||{};const trainN=Object.keys(lg).map(k=>lg[k].length).reduce((a,b)=>a+b,0);
+ const avgR=rs.length?Math.round(rs.reduce((a,b)=>a+b,0)/rs.length):null;
+ const wr=(st.writing||[]).filter(w=>days.indexOf(w.d)>=0);
+ return {wk:wk,done:done,ot:ot,vOk:vOk,vT:vT,acc:vT?Math.round(vOk/vT*100):null,
+  avgR:avgR,lOk:lOk,spD:spD,spMin:Math.round(spS/60),weak:weak,trainN:trainN,
+  wrongN:wrongList().length,wr:wr,stars:st.stars||0,streak:st.streak||0,
+  kw:knownWords(),tw:totalWords()};
+}
+function dRow(k,v){return '<div class="spread" style="padding:6px 0"><span class="tiny muted">'+k+'</span><b>'+v+'</b></div>';}
+function digestHTML(d){
+ let h='<div class="wcard" style="text-align:center"><div style="font-size:30px">'+(d.done>=6?'🏆':(d.done>=4?'🌱':'💤'))+'</div>'+
+  '<div style="font-size:19px;font-weight:800;margin-top:4px">本周打卡 '+d.done+' / 7 天</div>'+
+  '<div class="tiny muted" style="margin-top:4px">'+d.wk+' 起 · 准时 '+d.ot+' 天 · ⭐ '+d.stars+' · 连续 '+d.streak+' 天</div></div>';
+ h+='<div class="sec-t">四项能力</div><div class="card" style="padding:12px 14px">'+
+  dRow('背词正确率',d.acc==null?'—':d.acc+'%（'+d.vOk+' / '+d.vT+'）')+
+  dRow('跟读平均分',d.avgR==null?'—':d.avgR+' 分')+
+  dRow('听力答对',d.lOk+' 题')+
+  dRow('口语对话',d.spD+' 天 · '+d.spMin+' 分钟')+
+  dRow('技能训练',d.trainN+' 次')+
+  dRow('错词本',d.wrongN+' 个待攻克')+
+  dRow('单词量',d.kw+' / '+d.tw+' 掌握')+'</div>';
+ if(d.weak.length)h+='<div class="sec-t">最需要攻克的词</div><div class="card" style="padding:12px 14px">'+
+  '<div style="display:flex;flex-wrap:wrap;gap:6px">'+d.weak.map(w=>'<span class="pill y">'+esc(w)+'</span>').join('')+'</div>'+
+  '<div class="tiny muted" style="margin-top:8px">这些词已经在复习队列和错词本里，不用你手动整理。</div></div>';
+ if(d.wr.length)h+='<div class="sec-t">本周写作</div><div class="card" style="padding:12px 14px">'+
+  d.wr.map(w=>'<div style="margin-bottom:10px"><span class="pill b">'+w.words+' 词</span>'+
+   '<div style="font-size:14px;line-height:1.6;margin-top:4px">'+esc(w.text)+'</div></div>').join('')+'</div>';
+ return h;
+}
+function showDigest(){const d=weekDigest();ov('📊 本周周报',digestHTML(d)+
+ '<button class="btn block" style="margin-top:14px" data-act="digestExport">📄 导出 / 打印</button>'+
+ '<button class="btn o block" style="margin-top:8px" data-act="ovClose">关闭</button>','',0);}
+function exportDigest(){
+ const d=weekDigest();
+ const css='body{font-family:-apple-system,"Microsoft YaHei",sans-serif;max-width:560px;margin:24px auto;padding:0 16px;color:#333;line-height:1.75}'+
+  'h1{font-size:20px}h2{font-size:15px;margin-top:22px;color:#8A5A33;border-left:4px solid #E0A06A;padding-left:8px}'+
+  '.r{display:flex;justify-content:space-between;border-bottom:1px solid #eee;padding:7px 0}'+
+  '.pill{display:inline-block;background:#FFF1E6;border-radius:10px;padding:2px 9px;margin:3px;font-size:13px}p{font-size:14px}';
+ const body='<h1>英语萌宠乐园 · 本周周报</h1>'+
+  '<div class="r"><span>周次</span><b>'+d.wk+' 起</b></div>'+
+  '<div class="r"><span>打卡</span><b>'+d.done+' / 7 天（准时 '+d.ot+' 天）</b></div>'+
+  '<div class="r"><span>背词正确率</span><b>'+(d.acc==null?'—':d.acc+'%')+'</b></div>'+
+  '<div class="r"><span>跟读平均分</span><b>'+(d.avgR==null?'—':d.avgR+' 分')+'</b></div>'+
+  '<div class="r"><span>听力答对</span><b>'+d.lOk+' 题</b></div>'+
+  '<div class="r"><span>口语对话</span><b>'+d.spD+' 天 · '+d.spMin+' 分钟</b></div>'+
+  '<div class="r"><span>技能训练</span><b>'+d.trainN+' 次</b></div>'+
+  '<div class="r"><span>单词量</span><b>'+d.kw+' / '+d.tw+' 掌握</b></div>'+
+  (d.weak.length?'<h2>最需要攻克的词</h2>'+d.weak.map(w=>'<span class="pill">'+esc(w)+'</span>').join(''):'')+
+  (d.wr.length?'<h2>本周写作</h2>'+d.wr.map(w=>'<p>'+esc(w.text)+'（'+w.words+' 词）</p>').join(''):'');
+ const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>周报 '+d.wk+'</title><style>'+css+'</style></head><body>'+body+'</body></html>';
+ try{
+  const w=window.open('','_blank');
+  if(w){w.document.write(html);w.document.close();toast('周报已在新窗口打开，可打印或存 PDF 🖨️');}
+  else throw 0;
+ }catch(e){
+  try{const b=new Blob([html],{type:'text/html'});const u=URL.createObjectURL(b);
+   const a=document.createElement('a');a.href=u;a.download='周报_'+d.wk+'.html';document.body.appendChild(a);a.click();
+   setTimeout(()=>{URL.revokeObjectURL(u);a.remove();},600);toast('周报已导出 📄');}catch(e2){toast('导出失败，请换个浏览器');}
+ }
+}
+/* ---- PK 榜：每个孩子数据独立，只比本周打卡天数 ---- */
+function pkRows(){
+ const wk=weekKey(today());const days=Array.from({length:7},(_,i)=>addDays(wk,i));
+ const calc=(key,label,isCur)=>{const o={label:label,days:0,stars:0,min:0,isCur:isCur,empty:true};
+  try{const raw=JSON.parse(localStorage.getItem(key)||'null');if(!raw)return o;
+   o.empty=false;o.stars=raw.stars||0;o.min=(raw.speak&&raw.speak.min)||0;
+   days.forEach(k=>{const d=raw.day&&raw.day[k];if(d&&d.doneAt)o.days++;});}catch(e){}
+  return o;};
+ const rows=[calc(lsKey(),kidName()+'（当前）',true)];
+ kidList().forEach(p=>{const key=LS+'_'+p.id;if(key===lsKey())return;rows.push(calc(key,p.name,false));});
+ rows.sort((a,b)=>b.days-a.days);
+ return rows;
+}
+function pkHTML(){
+ const rows=pkRows();let h='<div class="card" style="padding:12px 14px">';
+ rows.forEach((r,i)=>{h+='<div class="spread" style="padding:8px 0'+(i<rows.length-1?';border-bottom:1px solid var(--line)':'')+'">'+
+  '<b>'+(i===0?'🥇 ':i===1?'🥈 ':i===2?'🥉 ':'')+esc(r.label)+'</b>'+
+  '<span class="tiny muted">'+(r.empty?'还没有数据':('本周 '+r.days+' 天 · ⭐'+r.stars+' · 口语 '+r.min+' 分钟'))+'</span></div>';});
+ h+='</div><div class="tiny muted" style="margin-top:8px">排行只看本周打卡天数。切换孩子会重新加载页面，数据互不影响。</div>';
+ return h;
 }
 
 /* ---------- 家长端 ---------- */
@@ -1229,12 +1608,26 @@ function vParent(){
   '<div class="list-item"><div class="t"><b>本月口语</b><span>打卡 '+speakCount(m)+' 天 · 累计 '+Math.round(speakMonthSec(m)/60)+' 分钟 · 连续 '+(st.speak&&st.speak.streak||0)+' 天</span></div>'+
   '<button class="btn o sm" data-act="spkView">今日提示词</button></div>'+
   '<div class="tiny muted" style="margin-top:8px">对话在豆包（或通义/元宝）里进行，工作台负责发提示词、计时、打卡。孩子在平板上点「口语」即可，家长不用陪。</div></div>';
+ h+='<div class="sec-t">本周周报</div><div class="card">'+
+  '<div class="spread"><div class="t"><b>📊 一屏看完这周</b><span>打卡 / 正确率 / 跟读分 / 口语 / 薄弱词</span></div></div>'+
+  '<button class="btn block sm" style="margin-top:10px" data-act="digest">查看本周周报</button>'+
+  '<button class="btn o block sm" style="margin-top:10px" data-act="digestExport">导出 / 打印（可存 PDF）</button>'+
+  (st.writing&&st.writing.length?'<div class="tiny muted" style="margin-top:8px">已保存 '+st.writing.length+' 篇写作练习</div>':'')+'</div>';
+ h+='<div class="sec-t">孩子档案 · PK 榜</div>'+pkHTML()+
+  '<div class="card" style="margin-top:10px">'+
+  kidList().map(p=>'<div class="list-item"><div class="t"><b>'+esc(p.name)+'</b><span>'+(curKid()===p.id?'当前使用中':'点击切换')+'</span></div>'+
+   '<span><button class="btn o sm" data-act="kidSwitch" data-id="'+p.id+'" data-n="'+esc(p.name)+'">切换</button> '+
+   '<button class="btn o sm" data-act="kidDel" data-id="'+p.id+'">删除</button></span></div>').join('')+
+  (curKid()?'<div class="list-item"><div class="t"><b>主档案</b><span>最早那套数据</span></div>'+
+   '<button class="btn o sm" data-act="kidSwitch" data-id="" data-n="主档案">切换</button></div>':'')+
+  '<button class="btn block sm" style="margin-top:12px" data-act="kidAdd">+ 添加一个孩子</button>'+
+  '<div class="tiny muted" style="margin-top:8px">每个孩子一套独立数据。切换后页面会重新加载，不会混在一起。</div></div>';
  h+='<div class="sec-t">数据</div><div class="card">'+
   '<button class="btn block sm" data-act="export">导出备份（JSON）</button>'+
   '<button class="btn o block sm" style="margin-top:10px" data-act="import">导入备份</button>'+
   '<input type="file" id="impFile" accept=".json" style="display:none">'+
   '<button class="btn o block sm" style="margin-top:10px" data-act="chPin">修改密码</button>'+
-  '<div class="tiny muted" style="margin-top:12px">已用存储约 '+Math.round((localStorage.getItem(LS)||'').length/1024)+' KB（上限约 5 MB，建议每月导出一次）</div>'+
+  '<div class="tiny muted" style="margin-top:12px">已用存储约 '+Math.round((localStorage.getItem(lsKey())||'').length/1024)+' KB（上限约 5 MB，建议每月导出一次）</div>'+
   '<button class="btn o block sm" style="margin-top:14px" data-act="forceUpdate">🔄 强制更新（清缓存）</button>'+
   '<div class="tiny muted" style="margin-top:10px">当前版本 '+APP_VER+' · 页面看着不对就点上面那个</div>'+
   '<button class="btn gray block sm" style="margin-top:14px" data-act="wipe">清空全部数据</button></div>';
@@ -1688,9 +2081,31 @@ let dr={blob:null,secs:0,recording:false};
 function taskDiary(){
  dr={blob:null,secs:0,recording:false};
  if(REV){diaryReview();return;}
+ /* 先读一遍前几天在口语 / 日记里记下的句子，再写今天的新句子 */
+ const ps=pendingSents();
+ if(ps.length){dr.step='sent';dr.ps=ps.slice(-3);dr.pi=0;
+  ov('④ 先复习 · 我说过的句子','','',3);sentReviewStep();return;}
+ dr.step='main';
  const weekWords=weekNewWords();
  ov('④ 说一句 · 写一句','','',5);diaryStep();
  window._ww=weekWords;
+}
+/* ---- 句子回流：前几天学会的句子，读一遍就过 ---- */
+function sentReviewStep(){
+ if(dr.pi>=dr.ps.length){
+  dr.step='main';const weekWords=weekNewWords();
+  ov('④ 说一句 · 写一句','','',5);diaryStep();window._ww=weekWords;return;}
+ const s=dr.ps[dr.pi];
+ const h='<div class="tiny muted" style="text-align:center;margin-bottom:10px">复习 '+(dr.pi+1)+' / '+dr.ps.length+
+  ' · 来自'+(s.src==='diary'?'我写的日记':'豆包口语')+'</div>'+
+  '<div class="wcard"><div style="font-size:19px;line-height:1.65">'+esc(s.t)+'</div>'+
+  '<button class="spk" data-act="sentPlay">🔊</button>'+
+  '<div class="tiny muted" style="margin-top:8px">先听一遍，再自己读一遍</div></div>'+
+  '<div class="answers"><button class="btn o" data-act="sentSkip">跳过</button>'+
+  '<button class="yes" data-act="sentOk">'+(dr.pi+1>=dr.ps.length?'读完了，去写今天的 ✓':'读过啦 →')+'</button></div>';
+ ovBodySet(h);
+ setTimeout(()=>say(s.t,0.8,{}),250);
+ window._curSent=s;
 }
 /* ---- 回看：看今天写过的话 ---- */
 function diaryReview(){
@@ -1821,8 +2236,61 @@ document.addEventListener('click',function(e){
    ({vocab:taskVocab,read:taskRead,listen:taskListen,diary:taskDiary})[t]();break;}
   case 'revExit':{REV=false;ovClose();break;}
   case 'todayReport':showTodayReport();break;
+  /* 周报 + 多孩子 */
+  case 'digest':showDigest();break;
+  case 'digestExport':exportDigest();break;
+  case 'kidAdd':modal('<h3>添加一个孩子</h3><p>名字会显示在 PK 榜上</p>'+
+   '<div class="fld"><input id="kName" placeholder="例如：三姐" style="width:100%;padding:12px;border:2px solid var(--line);border-radius:13px;font-size:16px"></div>'+
+   '<div class="mbtns"><button class="btn o" data-act="mClose">取消</button><button class="btn" data-act="kidAddSave">添加</button></div>');break;
+  case 'kidAddSave':{const n=(document.getElementById('kName').value||'').trim();
+   if(!n){toast('先写个名字');return;}
+   const l=kidList();l.push({id:'k'+Date.now().toString(36),name:n});saveKids(l);modalClose();render();
+   toast('已添加：'+n);break;}
+  case 'kidSwitch':{const n=a.dataset.n||'这个孩子';
+   modal('<h3>切换到 '+esc(n)+'</h3><p>页面会重新加载。<b>两个孩子的进度各自独立，不会混。</b></p>'+
+    '<div class="mbtns"><button class="btn o" data-act="mClose">取消</button>'+
+    '<button class="btn" data-act="kidSwitchGo" data-id="'+(a.dataset.id||'')+'">切换</button></div>');break;}
+  case 'kidSwitchGo':{const id=a.dataset.id||'';try{localStorage.setItem('ket_park_cur',id);}catch(e){}location.reload();break;}
+  case 'kidDel':{const id=a.dataset.id;
+   modal('<h3>删除这个档案？</h3><p>只是从列表里移除，孩子的进度还在浏览器里（切换回来仍在）。</p>'+
+    '<div class="mbtns"><button class="btn o" data-act="mClose">取消</button>'+
+    '<button class="btn gray" data-act="kidDelGo" data-id="'+id+'">删除</button></div>');break;}
+  case 'kidDelGo':{const id=a.dataset.id;saveKids(kidList().filter(x=>x.id!==id));
+   if(curKid()===id){try{localStorage.setItem('ket_park_cur','');}catch(e){}}
+   modalClose();location.reload();break;}
   /* ⑤ 口语（豆包 AI 对话） */
   case 'spkOpen':{REV=false;taskSpeak();break;}
+  /* 错词本 */
+  case 'wbOpen':taskWrongBook();break;
+  case 'wbPlay':wbPlay();break;
+  case 'wbPick':{
+   const c=wb.cur;if(!c||c.answered)break;c.answered=true;
+   const i=+a.dataset.i,ok=(i===c.ans);wb.total++;
+   const e=st.wrongBook[c.id];
+   if(ok){wb.ok++;grade(c.id,true);if(e){e.ok=(e.ok||0)+1;if(e.ok>=2)delWrong(c.id);}}
+   else{grade(c.id,false);if(e){e.n++;e.last=today();e.ok=0;}}
+   save();
+   a.classList.add(ok?'ok':'bad');
+   if(!ok)a.parentNode.querySelectorAll('.opt').forEach(x=>{if(+x.dataset.i===c.ans)x.classList.add('ok');});
+   setTimeout(()=>{wb.i++;wbStep();},ok?500:900);break;}
+  case 'wbRemove':{delWrong(a.dataset.id);save();taskWrongBook();break;}
+  /* 🎯 技能训练（KET 真题题型） */
+  case 'skill':skillMenu();break;
+  case 'skPick':exStart(a.dataset.k);break;
+  case 'r1Pick':{
+   const q=ex.set.qs[ex.i];const i=+a.dataset.i,ok=(i===q.a);ex.total++;if(ok)ex.ok++;
+   a.classList.add(ok?'ok':'bad');
+   if(!ok)a.parentNode.querySelectorAll('.opt').forEach(x=>{if(+x.dataset.i===q.a)x.classList.add('ok');});
+   setTimeout(()=>{ex.i++;exR1();},ok?520:1100);break;}
+  case 'r2Pick':{
+   const q=ex.set.qs[ex.i];const i=+a.dataset.i,ok=(i===q.a);ex.total++;if(ok)ex.ok++;
+   a.classList.add(ok?'ok':'bad');
+   if(!ok)a.parentNode.querySelectorAll('.opt').forEach(x=>{if(+x.dataset.i===q.a)x.classList.add('ok');});
+   setTimeout(()=>{ex.i++;exR2();},ok?520:1100);break;}
+  case 'wSubmit':writeSubmit(a.dataset.k);break;
+  case 'l2Play':{say(ex.set.mono,0.8,{});break;}
+  case 'l2Check':l2Check();break;
+  case 'l2Again':{ex.i=0;ex.ok=0;ex.total=0;exL2();break;}
   case 'spkCopy':{
    const txt=speakText(spk.tpl);
    const done=()=>toast('提示词已复制，去豆包粘贴 📋');
@@ -1861,7 +2329,7 @@ document.addEventListener('click',function(e){
    const c=vc.cur;if(!c||c.answered)break;c.answered=true;
    const i=+a.dataset.i,ok=(i===c.ans);vc.total++;
    if(ok){vc.correct++;vc.combo++;if(vc.combo>vc.maxCombo)vc.maxCombo=vc.combo;grade(c.id,true);}
-   else{vc.combo=0;vc.wrong.push(c.id);grade(c.id,false);}
+   else{vc.combo=0;vc.wrong.push(c.id);grade(c.id,false);addWrong(c.id,'vocab');}
    save();
    a.classList.add(ok?'ok':'bad');
    if(!ok){a.parentNode.querySelectorAll('.opt').forEach(x=>{if(+x.dataset.i===c.ans)x.classList.add('ok');});}
@@ -1875,12 +2343,12 @@ document.addEventListener('click',function(e){
    const w=wById(vc.dic.list[vc.dic.i]);const v=(document.getElementById('dicIn').value||'').trim().toLowerCase();
    const ok=v===w.w.toLowerCase();
    if(ok){vc.dic.ok++;grade(vc.dic.list[vc.dic.i],true);toast('拼写正确 ✓');}
-   else{grade(vc.dic.list[vc.dic.i],false);
+   else{grade(vc.dic.list[vc.dic.i],false);addWrong(vc.dic.list[vc.dic.i],'dic');
     document.getElementById('dicMsg').innerHTML='<b style="color:#E86A33">正确拼写：'+esc(w.w)+'</b> · 明天再练';
     document.getElementById('dicIn').value=w.w;say(w.w,0.7,{kind:'word',key:w.w});save();
     setTimeout(()=>{vc.dic.i++;dictCard();},1700);return;}
    save();vc.dic.i++;dictCard();break;}
-  case 'dicHint':{const w=wById(vc.dic.list[vc.dic.i]);grade(vc.dic.list[vc.dic.i],false);save();
+  case 'dicHint':{const w=wById(vc.dic.list[vc.dic.i]);grade(vc.dic.list[vc.dic.i],false);addWrong(vc.dic.list[vc.dic.i],'dic');save();
    document.getElementById('dicMsg').innerHTML='<b>'+esc(w.w)+'</b> · <span class="muted">'+esc(w.cn||'')+'</span>';
    document.getElementById('dicIn').value=w.w;say(w.w,0.7,{kind:'word',key:w.w});
    setTimeout(()=>{vc.dic.i++;dictCard();},1700);break;}
@@ -1932,6 +2400,10 @@ document.addEventListener('click',function(e){
     else{setTimeout(()=>{document.getElementById('lResult').innerHTML='<div class="card" style="text-align:center"><div class="tiny muted">再听一遍试试，听完可以看原文对照</div><button class="btn block sm" style="margin-top:10px" data-act="lp1">再听一次</button></div>';window._lq.ans={};},600);}
    }
    break;}
+  /* 句子回流复习 */
+  case 'sentPlay':{const s=window._curSent;if(s)say(s.t,0.75,{});break;}
+  case 'sentSkip':{const s=window._curSent;if(s)s.rev=true;save();dr.pi++;sentReviewStep();break;}
+  case 'sentOk':{const s=window._curSent;if(s){s.rev=true;save();}dr.pi++;sentReviewStep();break;}
   /* 日记 */
   case 'drec':{
    if(!canRec()){toast('当前环境不支持录音');return;}
@@ -1942,12 +2414,12 @@ document.addEventListener('click',function(e){
    const t=(document.getElementById('dText').value||'').trim();
    const n=t.split(/\s+/).filter(Boolean).length;
    if(n<8){toast('再写长一点，至少 8 个词');return;}
-   st.diary.push({d:today(),t:t,rec:dr.secs||0});save();
+   st.diary.push({d:today(),t:t,rec:dr.secs||0});addSents([t],'diary');save();
    finishTask('diary',{words:n,text:t,rec:dr.secs||0});ovClose();break;}
   /* 小测 */
   case 'quiz':taskQuiz();break;
   case 'qAns':{const i=+a.dataset.i;const q=qz.qs[qz.i];
-   if(i===q.a){qz.ok++;}else if(q.wid)qz.weak.push(q.wid);
+   if(i===q.a){qz.ok++;}else{if(q.wid){qz.weak.push(q.wid);addWrong(q.wid,'quiz');}}
    a.classList.add(i===q.a?'ok':'bad');
    if(i!==q.a)a.parentNode.querySelectorAll('.opt').forEach(x=>{if(x.dataset.i==q.a)x.classList.add('ok');});
    setTimeout(()=>{qz.i++;quizStep();},620);break;}
@@ -2007,7 +2479,7 @@ document.addEventListener('click',function(e){
   case 'wipe':{
    modal('<h3>⚠️ 清空全部数据</h3><p>打卡、星星、勋章、相册都会被删除，且无法恢复。建议先导出备份。</p>'+
     '<div class="mbtns"><button class="btn o" data-act="mClose">取消</button><button class="btn gray" data-act="wipe2">确认清空</button></div>');break;}
-  case 'wipe2':{localStorage.removeItem(LS);location.reload();break;}
+  case 'wipe2':{localStorage.removeItem(lsKey());location.reload();break;}
   case 'redoToday':{
    modal('<h3>🔄 重做今天</h3><p>清空今天的打卡记录，并把今天新学的单词退回「未学」状态，可以完整再走一遍。<br><span style="color:var(--muted);font-size:13px">星星和勋章不会退回。</span></p>'+
     '<div class="mbtns"><button class="btn o" data-act="mClose">取消</button><button class="btn" data-act="redoToday2">确认重做</button></div>');break;}
@@ -2130,6 +2602,10 @@ function checkSpecials(){
  if(st.streak>=100&&!st.badges.s_100){st.badges.s_100=true;save();confetti(50);celebrate('百日坚持！','解锁 🔥 特别勋章');}
  const got=Array.from({length:18},(_,i)=>st.badges['m'+(i+1)]).filter(Boolean).length;
  if(got>=18&&!st.badges.s_all){st.badges.s_all=true;save();confetti(60);celebrate('萌宠全家福！','18 只全部集齐 🌈');}
+ const sk=st.speak||{};
+ if((sk.streak||0)>=7&&!st.badges.s_spk7){st.badges.s_spk7=true;save();confetti(36);celebrate('口语小达人！','🗣️ 连续 7 天开口');}
+ if((sk.streak||0)>=30&&!st.badges.s_spk30){st.badges.s_spk30=true;save();confetti(50);celebrate('口语小主播！','🎙️ 连续 30 天');}
+ if(!wrongList().length&&(st.badges.s_wb_unlocked)&&!st.badges.s_wb){st.badges.s_wb=true;save();confetti(30);celebrate('错词清零！','🧹 全部攻克');}
 }
 /* URL 参数入口（用完立刻抹掉参数，否则加到桌面后每次打开都会再执行一次）
    ?redo=1  清空今天的打卡记录，今天新学的词退回「未学」
