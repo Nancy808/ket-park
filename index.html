@@ -349,9 +349,17 @@ const diffDays=(a,b)=>Math.round((parse(b)-parse(a))/86400000);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
-function mStart(m){return new Date(2026,8+(m-1),1);}
-function mEnd(m){return new Date(2026,8+m,0);}
-function moduleOf(s){const d=parse(s);let m=(d.getFullYear()-2026)*12+(d.getMonth()-8)+1;return Math.min(18,Math.max(1,m));}
+/* 锚点 = st.start（家长端/首启可改）。月份推进全部相对锚点计算：
+   中断一段时间后只要挪起点，M 序号跟着重置，不会按日历硬跳级。 */
+function anchor(){const s=(typeof st!=='undefined'&&st&&st.start)?st.start:START;const d=parse(s);return (d&&!isNaN(d))?d:parse(START);}
+/* 按"起点日 + n 个月"滚动，不切自然月：起点 10/13 → M1 = 10/13–11/12，M2 = 11/13–12/12 */
+function mStart(m){const a=anchor();return new Date(a.getFullYear(),a.getMonth()+(m-1),Math.min(a.getDate(),28));}
+function mEnd(m){const a=anchor();return new Date(a.getFullYear(),a.getMonth()+m,Math.min(a.getDate(),28)-1);}
+function moduleOf(s){const a=anchor(),d=parse(s);let m=(d.getFullYear()-a.getFullYear())*12+(d.getMonth()-a.getMonth())+((d.getDate()>=Math.min(a.getDate(),28))?1:0);return Math.min(18,Math.max(1,m));}
+/* 通关门槛：当月还剩几天就放宽到几（留 4 天缓冲），区间 12–18 天 */
+function monthNeed(m){
+ const left=Math.max(1,diffDays(today(),fmt(mEnd(m)))+1);
+ return Math.max(12,Math.min(18,left-4));}
 function weekKey(s){const d=parse(s);const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);return fmt(d);}
 function toast(t){const e=document.getElementById('toast');e.textContent=t;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),2200);}
 
@@ -382,7 +390,7 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.11.0';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.12.0';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
@@ -471,7 +479,7 @@ function speakPlan(k){
 function speakText(tpl){
  let t=(SPK_TPL[tpl]||SPK_TPL.a).txt;
  if(tpl==='c'){
-  const i=Math.abs(Math.floor(diffDays(START,today())/7))%SPK_TOPICS.length;
+  const i=Math.abs(Math.floor(diffDays(fmt(anchor()),today())/7))%SPK_TOPICS.length;
   t=t.replace('【TOPIC】',SPK_TOPICS[i]);
  }
  return t;
@@ -500,15 +508,16 @@ function checkDay(){
 }
 function dayCount(m){return Object.keys(st.day).filter(k=>moduleOf(k)===m&&st.day[k]&&st.day[k].doneAt).length;}
 function checkMonthly(){
- const m=moduleOf(today());const rec=st.monthly[m]||(st.monthly[m]={passed:false});
- if(rec.passed)return;
- /* M1 从 9/7 才开始（比月初晚 6 天），当月只剩 24 天，门槛放宽到 18 天，
-    否则第一枚勋章就可能因"天数不够"拿不到，打击孩子。M2 起恢复 20 天。 */
- const need=(m===1?18:20);
- if(dayCount(m)>=need){
-  rec.passed=true;rec.at=today();
-  st.badges['m'+m]=true;st.msgs[m]=true;st.stars+=10;save();
-  setTimeout(()=>{confetti(50);celebrate('M'+m+' 通关！','⭐+10 · 解锁新萌宠');setTimeout(()=>askAlbum(m),1800);},900);
+ /* 遍历 1..当前月：中断/换月后，之前没判过的月份在这里补发，勋章不会永久漏掉 */
+ const cur=moduleOf(today());
+ for(let m=1;m<=cur;m++){
+  const rec=st.monthly[m]||(st.monthly[m]={passed:false});
+  if(rec.passed)continue;
+  if(dayCount(m)>=monthNeed(m)){
+   rec.passed=true;rec.at=today();
+   st.badges['m'+m]=true;st.msgs[m]=true;st.stars+=10;save();
+   (function(mm){setTimeout(()=>{confetti(50);celebrate('M'+mm+' 通关！','⭐+10 · 解锁新萌宠');setTimeout(()=>askAlbum(mm),1800);},900);})(m);
+  }
  }
 }
 
@@ -905,7 +914,7 @@ function vHome(){
    '<button class="btn sm" data-act="todayReport">查看</button></div></div>';
  }
  if(d.doneAt){
-  const q=QUOTES[Math.abs(Math.round((parse(today())-parse(START))/86400000))%QUOTES.length];
+  const q=QUOTES[Math.abs(Math.round((parse(today())-parse(fmt(anchor())))/86400000))%QUOTES.length];
   h+='<div class="quote"><div class="en">'+q[0]+'</div><div class="cn">'+q[1]+'</div></div>';
  }
  const wd=new Date().getDay();
@@ -932,13 +941,23 @@ function vHome(){
   wn.map(w=>'<span class="pill b">'+esc(w.w)+'</span>').join('')+'</div></div>';
  return h;
 }
+/* 上个月没学完的词（中断/跳月会留下断层），并入本月池优先消化 */
+function catchUpIds(m){
+ if(m<1)return [];
+ const pw=mWords(m);const out=[];
+ pw.forEach((w,i)=>{const id=wid(m,i);const r=st.words[id];if(!r||!r.intro)out.push(id);});
+ return out;
+}
 function todayQueue(){
  const m=moduleOf(today());const ws=mWords(m);const d=getDay();
  if(!d.newIds||!d.newIds.length){
-  const rem=[];ws.forEach((w,i)=>{const r=st.words[wid(m,i)];if(!r||!r.intro)rem.push(i);});
+  const rem=[];ws.forEach((w,i)=>{const r=st.words[wid(m,i)];if(!r||!r.intro)rem.push(wid(m,i));});
+  /* 补漏：上月未学词排前面，但每天最多带 3 个，别把本月新词挤掉 */
+  const back=catchUpIds(m-1).slice(0,3);
+  const pool=back.concat(rem);
   const daysLeft=Math.max(1,diffDays(today(),fmt(mEnd(m)))+1);
-  let q=Math.ceil(rem.length/daysLeft);q=Math.min(10,Math.max(2,q));
-  d.newIds=rem.slice(0,q).map(i=>wid(m,i));save();
+  let q=Math.ceil(pool.length/daysLeft);q=Math.min(10,Math.max(2,q));
+  d.newIds=pool.slice(0,q);save();
  }
  const rev=Object.keys(st.words).filter(id=>{const r=st.words[id];return r.intro&&r.due&&r.due<=today()&&d.newIds.indexOf(id)<0;})
   .sort((a,b)=>st.words[a].due.localeCompare(st.words[b].due)).slice(0,30);
@@ -1622,6 +1641,15 @@ function vParent(){
    '<button class="btn o sm" data-act="kidSwitch" data-id="" data-n="主档案">切换</button></div>':'')+
   '<button class="btn block sm" style="margin-top:12px" data-act="kidAdd">+ 添加一个孩子</button>'+
   '<div class="tiny muted" style="margin-top:8px">每个孩子一套独立数据。切换后页面会重新加载，不会混在一起。</div></div>';
+ /* 重启 / 调整起点：中断一段时间后用这个把 M 序号掰回 M1 */
+ const _m=moduleOf(today());
+ h+='<div class="sec-t">重启 / 调整起点</div><div class="card">'+
+  '<div class="spread"><b>当前 M'+_m+'</b><span class="tiny muted">起点 '+(st.start||START)+' · 本月需 '+monthNeed(_m)+' 天（已 '+dayCount(_m)+' 天）</span></div>'+
+  '<div class="tiny muted" style="margin:10px 0 8px;line-height:1.7">停用一段时间后月份会按日历往前跑。把起点挪到今天，M 序号、每日词量、读物难度就全部从头算——已得的勋章、星星、单词记录<b>不会丢</b>。</div>'+
+  '<button class="btn block sm" data-act="reAnchorToday">把起点设为今天（重开 M1）</button>'+
+  '<div class="fld" style="margin-top:10px"><label>或指定起点日期</label><input type="date" id="anIn" value="'+(st.start||START)+'" style="width:100%;padding:11px;border:2px solid var(--line);border-radius:12px;font-size:15px"></div>'+
+  '<button class="btn o block sm" style="margin-top:8px" data-act="reAnchor">按这个日期重算</button>'+
+  '</div>';
  h+='<div class="sec-t">数据</div><div class="card">'+
   '<button class="btn block sm" data-act="export">导出备份（JSON）</button>'+
   '<button class="btn o block sm" style="margin-top:10px" data-act="import">导入备份</button>'+
@@ -2236,6 +2264,15 @@ document.addEventListener('click',function(e){
    ({vocab:taskVocab,read:taskRead,listen:taskListen,diary:taskDiary})[t]();break;}
   case 'revExit':{REV=false;ovClose();break;}
   case 'todayReport':showTodayReport();break;
+  /* 中断后回归 */
+  case 'backResume':{modalClose();render();break;}
+  case 'backRestart':{st.start=today();st.streak=0;st._backAt=today();save();modalClose();
+   toast('起点已挪到今天，从 M1 重新开始');render();break;}
+  case 'reAnchor':{
+   const el=document.getElementById('anIn');if(!el)break;
+   const v=el.value;if(!v){toast('先选一个日期');break;}
+   st.start=v;save();toast('起点已改为 '+v+'，当前 M'+moduleOf(today()));render();break;}
+  case 'reAnchorToday':{st.start=today();save();toast('起点已设为今天，当前 M1');render();break;}
   /* 周报 + 多孩子 */
   case 'digest':showDigest();break;
   case 'digestExport':exportDigest();break;
@@ -2597,6 +2634,26 @@ document.addEventListener('click',e=>{const a=e.target.closest('[data-act="frSav
  st.start=document.getElementById('sdIn').value||START;
  save();modalClose();render();});
 
+/* ---------- 中断后回归引导 ---------- */
+function checkReturn(){
+ try{
+  if(!st.lastDay||!st.name)return;
+  const gap=diffDays(st.lastDay,today());
+  if(gap<7)return;                       // 断 7 天以上才提示
+  if(st._backAt===st.lastDay)return;     // 断后只提示一次
+  st._backAt=st.lastDay;save();
+  const m=moduleOf(today());
+  const doneM=Object.keys(st.badges).filter(k=>/^m\d+$/.test(k)&&st.badges[k]).length;
+  modal('<h3>欢迎回来 👋</h3>'+
+   '<p>上次打卡是 <b>'+esc(st.lastDay)+'</b>，已经过去 <b>'+gap+' 天</b>。</p>'+
+   '<p class="tiny muted">已拿到 '+doneM+' 只萌宠 · ⭐ '+(st.stars||0)+' · 当前 M'+m+'。中断不影响已得的勋章和单词记录。</p>'+
+   '<div class="fld"><label>怎么继续？</label></div>'+
+   '<div class="mbtns"><button class="btn" data-act="backResume">继续 M'+m+'（接着学）</button></div>'+
+   '<div class="mbtns"><button class="btn o" data-act="backRestart">从今天重开 M1（推荐）</button></div>'+
+   '<div class="tiny muted" style="margin-top:8px;line-height:1.7">重开 M1 = 把起点挪到今天，月份序号、每日词量、读物难度全部从头算，之前的数据和勋章都保留。</div>');
+ }catch(e){}
+}
+
 /* ---------- 特别勋章检查 ---------- */
 function checkSpecials(){
  if(st.streak>=100&&!st.badges.s_100){st.badges.s_100=true;save();confetti(50);celebrate('百日坚持！','解锁 🔥 特别勋章');}
@@ -2665,7 +2722,7 @@ if(typeof window.WORDS==='undefined'){
  fatalBox('数据文件没加载：index.html 必须和 data/ 文件夹放在一起','window.WORDS is undefined');
 }else{
  try{
-  render();loadVoices();checkSpecials();firstRun();
+  render();loadVoices();checkSpecials();firstRun();checkReturn();
   var _v=document.getElementById('view');
   if(_v&&!_v.innerHTML.trim())fatalBox('页面渲染为空','render() 没有输出内容');
  }catch(e){fatalBox('初始化出错',e);}
