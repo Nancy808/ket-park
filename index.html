@@ -325,7 +325,7 @@ const DEF=()=>({v:1,ver:VERSION,name:'',start:START,stars:0,streak:0,best:0,last
  quiz:[],lotto:{chances:0,history:[]},rewards:[],pin:'1234',weekAward:{},speak:{streak:0,best:0,last:null,min:0},
  wrongBook:{},sents:[],examLog:{},writing:[],profiles:null,kid:null,
  shields:{cards:2,leaveUntil:''},monthly:{},exam:[],ttsOK:null,created:new Date().toISOString(),
- voice:'maisie',audio:true,pitch:1.25,voiceSet:0});
+ voice:'maisie',wvoice:'gb',audio:true,pitch:1.25,voiceSet:0});
 let st=load();
 /* 多孩子：每个孩子一套独立数据（key 加后缀），互不影响 */
 function curKid(){try{return localStorage.getItem('ket_park_cur')||'';}catch(e){return '';}}
@@ -390,7 +390,7 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.12.1';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.13.0';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
@@ -580,8 +580,12 @@ function voiceDir(){return st.voice==='libby'?'libby':st.voice==='maisie'?'maisi
 function readerURL(id){return 'audio/readers/'+voiceDir()+'/r'+id+'.mp3';}
 /* 单词索引：word -> [起始秒, 时长秒, 月份] */
 let WIDX=null,WIDXing=false,WIDXV='';
-/* 单词音频目录：ana 在 audio/words/ 根，maisie 在 audio/words/maisie/ */
-function wordDir(){return st.voice==='maisie'?'maisie/':'';}
+/* 单词音频目录：gb = gTTS 标准英音（默认）/ maisie = 童声 / 根目录 = 美音 Ana */
+function wordDir(){
+ if(st.wvoice==='gb')return 'gb/';
+ if(st.wvoice==='maisie')return 'maisie/';
+ return '';
+}
 function loadWIdx(cb){
  const vd=wordDir();
  if(WIDX&&WIDXV===vd){if(cb)cb();return;}
@@ -841,6 +845,12 @@ const VOICE_OPT=[
  {id:'libby',name:'Libby · 英音', desc:'亲和清晰，贴近 KET 听力口音',demo:'Hello! Let us read together!'},
  {id:'sys',  name:'系统语音',     desc:'不用联网，机械音但最省流量',demo:'Hello! Let us read together!'}
 ];
+/* 单词发音音色（独立于短文音色） */
+const WVOICE_OPT=[
+ {id:'gb',   name:'标准英音女声', desc:'成年女声 · 发音清晰饱满 · 贴近 KET 听力（默认）',demo:'panda'},
+ {id:'maisie',name:'Maisie · 英音小女孩',desc:'童声，语速快，适合已经听熟的孩子',demo:'panda'},
+ {id:'ana',  name:'Ana · 美音',   desc:'美式发音，和 KET 英音口音不一致',demo:'panda'}
+];
 function badgeSVG(b,locked){
  if(b.special)return '<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="'+(locked?'#EDEDED':'#FFE8DC')+'" stroke="'+(locked?'#DDD':'#FF8A65')+'" stroke-width="4"/><text x="50" y="66" font-size="44" text-anchor="middle">'+(locked?'🔒':b.icon)+'</text></svg>';
  const s=animalSVG(b.kind,b.tier,b.ch);
@@ -1074,17 +1084,26 @@ function vMe(){
    '<button class="btn o sm" data-act="wbOpen">去练习</button></div>'+
   '<div class="list-item"><div class="t"><b>💬 口语</b><span>连续 '+(st.speak&&st.speak.streak||0)+' 天 · 累计 '+(st.speak&&st.speak.min||0)+' 分钟 · 最长 '+(st.speak&&st.speak.best||0)+' 天</span></div></div>'+
   '</div>';
- h+='<div class="sec-t">朗读声音</div>';
+ h+='<div class="sec-t">朗读声音（短文）</div>';
  h+='<div class="card">'+VOICE_OPT.map(v=>
-   '<div class="list-item"><div class="t"><b>'+v.name+'</b><span>'+v.desc+'</span></div>'+
-   (st.voice===v.id?'<span class="pill g">使用中</span>'
-    :'<button class="btn o sm" data-act="setVoice" data-v="'+v.id+'">试听</button>')+'</div>').join('')+
+  '<div class="list-item"><div class="t"><b>'+v.name+'</b><span>'+v.desc+'</span></div>'+
+  (st.voice===v.id?'<span class="pill g">使用中</span>'
+   :'<button class="btn o sm" data-act="setVoice" data-v="'+v.id+'">试听</button>')+'</div>').join('')+
+  '<div class="tiny muted" style="margin-top:8px">跟读短文的配音。反馈 Maisie 童声不错，默认保留。</div></div>';
+ /* 单词音色独立切换：短文 OK 不代表单词 OK，两边分开调 */
+ h+='<div class="sec-t">单词发音</div>';
+ h+='<div class="card">'+WVOICE_OPT.map(v=>
+  '<div class="list-item"><div class="t"><b>'+v.name+'</b><span>'+v.desc+'</span></div>'+
+  (st.wvoice===v.id?'<span class="pill g">使用中</span>'
+   :'<button class="btn o sm" data-act="setWVoice" data-v="'+v.id+'">试听</button>')+'</div>').join('')+
+  '<div class="tiny muted" style="margin-top:8px">背词、听写的单词读音。默认「标准英音女声」——成年女声、发音清晰饱满，适合应试。</div></div>';
+ h+='<div class="card" style="margin-top:10px">'+
   '<div class="list-item"><div class="t"><b>预录音频</b><span>关闭后只用系统语音，省流量</span></div>'+
    '<button class="btn o sm" data-act="toggleAudio">'+(st.audio===false?'已关闭':'已开启')+'</button></div>'+
   '<div class="list-item"><div class="t"><b>音调</b><span>'+(st.pitch||1.25).toFixed(2)+' · 仅系统语音生效</span></div>'+
    '<span><button class="btn o sm" data-act="pitch" data-v="-0.1">−</button> '+
    '<button class="btn o sm" data-act="pitch" data-v="0.1">＋</button></span></div>'+
-  '<div class="tiny muted" style="margin-top:8px">预录音频为微软神经网络音色，声音接近真人</div></div>';
+  '<div class="tiny muted" style="margin-top:8px">预录音频离线可听，首次加载后不耗流量。</div></div>';
  h+='<div class="sec-t">设备自检</div>';
  h+='<div class="card"><div class="list-item"><div class="t"><b>英文语音（TTS）</b><span>'+(ttsReady?'已就绪 · 系统兜底可用':'未检测到英文语音包')+'</span></div>'+
   '<button class="btn o sm" data-act="ttsTest">测试</button></div>'+
@@ -2471,9 +2490,11 @@ document.addEventListener('click',function(e){
     '<div class="mbtns"><button class="btn o" data-act="mClose">取消</button><button class="btn" data-act="goalSave">保存</button></div>');break;}
   case 'goalSave':{st.goal=document.getElementById('gIn').value.trim();save();modalClose();toast('已保存');render();break;}
   case 'ttsTest':{speak('Hello! Practice makes perfect.',0.85,ok=>{toast(ok?'英文语音正常 🔊':'没有英文语音，请检查系统设置');});break;}
-  case 'setVoice':{st.voice=a.dataset.v;st.voiceSet=1;ttsVoice=null;WIDX=null;save();render();
+  case 'setVoice':{st.voice=a.dataset.v;st.voiceSet=1;ttsVoice=null;save();render();
    const v=VOICE_OPT.find(x=>x.id===st.voice);
-   setTimeout(()=>{say(v.demo,0.9,{kind:'word',key:'hello'});},120);break;}
+   setTimeout(()=>{say(v.demo,0.9,{kind:'reader',key:101});},120);break;}
+  case 'setWVoice':{st.wvoice=a.dataset.v;WIDX=null;save();render();
+   setTimeout(()=>{say('panda',0.9,{kind:'word',key:'panda'});},150);break;}
   case 'toggleAudio':{st.audio=(st.audio===false);save();render();
    toast(st.audio?'预录音频已开启':'已切换为系统语音');break;}
   case 'pitch':{st.pitch=Math.max(0.8,Math.min(1.8,+((st.pitch||1.25)+ +a.dataset.v).toFixed(2)));
@@ -2578,7 +2599,7 @@ function exportAlbum(){
   '.wrap{max-width:720px;margin:0 auto}h1{color:#E86A33;text-align:center}.m{background:#fff;border-radius:20px;padding:18px;margin:18px 0;box-shadow:0 2px 10px rgba(200,140,110,.12)}'+
   '.m img{width:100%;border-radius:14px;margin-bottom:10px}.note{background:#FFF6EE;border-left:4px solid #FF8A65;padding:10px 14px;border-radius:0 10px 10px 0}'+
   '.d{color:#6B6B6B;font-size:13px}@media print{body{background:#fff}}</style></head><body><div class="wrap">'+
-  '<h1>英语萌宠乐园</h1><p style="text-align:center;color:#6B6B6B">'+(esc(st.name)||'二姐')+' 的 18 个月成长纪念册</p>';
+  '<h1>英语萌宠乐园</h1><p style="text-align:center;color:#6B6B6B">'+(esc(st.name)||'Nancy')+' 的 18 个月成长纪念册</p>';
  Object.keys(st.album).sort((a,b)=>a-b).forEach(k=>{const a=st.album[k];
   h+='<div class="m"><div class="d">M'+k+' · '+esc(a.date||'')+'</div>'+(a.photo?'<img src="'+a.photo+'">':'')+
    (a.note?'<div class="note">'+esc(a.note)+'</div>':'')+'</div>';});
@@ -2624,13 +2645,13 @@ if('serviceWorker' in navigator){
 function firstRun(){
  if(st.name)return;
  modal('<h3>欢迎来到英语萌宠乐园 🎪</h3><p>这是属于你的英语小工具。每天 30 分钟，18 个月后你会集齐 18 只萌宠。</p>'+
-  '<div class="fld"><label>你的名字（或昵称）</label><input id="nmIn" placeholder="二姐"></div>'+
+  '<div class="fld"><label>你的名字（或昵称）</label><input id="nmIn" placeholder="Nancy"></div>'+
   '<div class="fld"><label>开始日期</label><input type="date" id="sdIn" value="'+START+'"></div>'+
   '<div class="tiny muted">数据只保存在这台设备上，不会上传。家长端可以定期导出备份。</div>'+
   '<div class="mbtns"><button class="btn" data-act="frSave">开始吧</button></div>');
 }
 document.addEventListener('click',e=>{const a=e.target.closest('[data-act="frSave"]');if(!a)return;
- st.name=(document.getElementById('nmIn').value||'').trim()||'二姐';
+ st.name=(document.getElementById('nmIn').value||'').trim()||'Nancy';
  st.start=document.getElementById('sdIn').value||START;
  save();modalClose();render();});
 

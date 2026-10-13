@@ -18,7 +18,7 @@ import asyncio, os, re, sys, json, subprocess, shutil
 BASE = os.path.dirname(os.path.abspath(__file__))
 TMP = os.path.join(BASE, '_tts_tmp')
 OUT = os.path.join(BASE, 'audio')
-FFMPEG = r"D:\codeX 安装文件\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg.exe"
+FFMPEG = r"D:\codeX\软件与缓存\安装文件\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg.exe"
 CONC = 8
 
 VOICES = {

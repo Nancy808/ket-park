@@ -14,7 +14,7 @@ VOICE_MAP = {'ana': 'en-US-AnaNeural', 'maisie': 'en-GB-MaisieNeural', 'libby': 
 # ana 放在 audio/words/ 根目录（保持兼容），其它音色放 audio/words/<voice>/
 VOICE = (sys.argv[2] if len(sys.argv) > 2 else 'ana').lower()
 OUT = os.path.join(BASE, 'audio', 'words') if VOICE == 'ana' else os.path.join(BASE, 'audio', 'words', VOICE)
-FFMPEG = r"D:\codeX 安装文件\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg.exe"
+FFMPEG = r"D:\codeX\软件与缓存\安装文件\Lib\site-packages\imageio_ffmpeg\binaries\ffmpeg.exe"
 NODE = r"C:\Users\Administrator\.workbuddy\binaries\node\versions\22.22.2-2\node.exe"
 VOICE_NAME, RATE, PITCH = VOICE_MAP.get(VOICE, 'en-US-AnaNeural'), '+0%', '+0Hz'
 GAP_MS = 260          # 词与词之间静音间隔（毫秒）

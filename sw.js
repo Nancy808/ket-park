@@ -5,7 +5,7 @@
    - 页面 / JS / 数据  → 网络优先（network-first），改完立刻生效；断网回落缓存
    - 音频              → 缓存优先，首次取回后离线可用（80MB，不能每次走网络）
    - Range 请求        → 直接走网络（音频 seek） */
-const VER = 'ket-park-v1.12.1';
+const VER = 'ket-park-v1.13.0';
 const ASSETS = [
   './',
   './index.html',
@@ -17,6 +17,7 @@ const ASSETS = [
   './data/readers_more.js',
   './data/exam.js',
   './audio/words/index.json',
+  './audio/words/gb/index.json',
   './audio/words/maisie/index.json',
   './icons/icon-192.png',
   './icons/icon-512.png',

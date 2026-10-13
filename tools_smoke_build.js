@@ -36,7 +36,7 @@ const test = `
      dump(); return;
    }
    log('1 首启弹窗', q('#mbox h3').textContent.trim());
-   document.getElementById('nmIn').value='二姐';
+   document.getElementById('nmIn').value='Nancy';
    click(q('[data-act="frSave"]')); await sleep(150);
 
    log('2 今日页', qa('.tk').length+' 个任务 / 锁定 '+qa('.tk.lock').length+' 个 / '+q('#subTitle').textContent);
