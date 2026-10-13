@@ -390,7 +390,7 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.12.0';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.12.1';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
@@ -2665,18 +2665,21 @@ function checkSpecials(){
  if(!wrongList().length&&(st.badges.s_wb_unlocked)&&!st.badges.s_wb){st.badges.s_wb=true;save();confetti(30);celebrate('错词清零！','🧹 全部攻克');}
 }
 /* URL 参数入口（用完立刻抹掉参数，否则加到桌面后每次打开都会再执行一次）
-   ?redo=1  清空今天的打卡记录，今天新学的词退回「未学」
-   ?nosw=1  注销 Service Worker + 清掉全部缓存（解决平板上一直看到旧版本）
-   两个一起用 = 彻底刷新：清缓存 + 清今日 + 重载 */
+   ?redo=1     清空今天的打卡记录，今天新学的词退回「未学」
+   ?nosw=1     注销 Service Worker + 清掉全部缓存（解决平板上一直看到旧版本）
+   ?restart=1  把起点设为今天，月份序号从 M1 重新算（勋章/星星/单词记录都保留）
+   一起用 = 彻底刷新 + 重开 M1 */
 (function(){
  try{
   const u=new URL(location.href);
   const redo=u.searchParams.get('redo')==='1';
   const nosw=u.searchParams.get('nosw')==='1';
-  if(!redo&&!nosw)return;
+  const restart=u.searchParams.get('restart')==='1';
+  if(!redo&&!nosw&&!restart)return;
   let n=0;
   if(redo)n=resetToday();
-  u.searchParams.delete('redo');u.searchParams.delete('nosw');
+  if(restart){st.start=today();st._backAt=today();st.streak=0;save();modalClose();}
+  u.searchParams.delete('redo');u.searchParams.delete('nosw');u.searchParams.delete('restart');
   history.replaceState(null,'',u.pathname+u.search+u.hash);
   render();
   if(nosw){
@@ -2690,7 +2693,8 @@ function checkSpecials(){
    setTimeout(done,2500);   // 兜底：万一上面卡住也强制重载
    return;
   }
-  setTimeout(()=>toast('今天的记录已清空（回滚 '+n+' 个新词），可以重新做一遍了'),600);
+  if(restart)setTimeout(()=>toast('起点已设为今天，从 M1 重新开始（勋章和记录都保留）'),600);
+  else setTimeout(()=>toast('今天的记录已清空（回滚 '+n+' 个新词），可以重新做一遍了'),600);
  }catch(e){}
 })();
 
