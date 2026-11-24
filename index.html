@@ -390,22 +390,26 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.13.0';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.15.1';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
 /* ---------- ⑤ 口语：对话在豆包里进行，工作台负责发提示词 / 计时 / 打卡 ---------- */
+/* 五问轮换题库：5 个主题组 × 7 题，每天从每组抽 1 题，7 天内不重复，同日 5 组各错开 2 题 */
+const SPK_QBANK=[
+ ["What is your name?","How old are you?","Where do you live?","Who is in your family?","Have you got a brother or sister?","What does your mum do?","Tell me about your family."],
+ ["Do you like your school? Why?","What is your favourite subject?","Who is your favourite teacher?","What is in your schoolbag?","How do you go to school?","What do you do at break time?","How many lessons do you have every day?"],
+ ["What is your favourite sport?","Can you swim?","Do you like music? What music?","Can you play a musical instrument?","Do you like drawing?","What do you like to read?","What do you usually do at the weekend?"],
+ ["What is your favourite food?","What do you eat for breakfast?","Do you like vegetables?","What is your favourite drink?","Do you help at home? What do you do?","What time do you get up?","What do you do after school?"],
+ ["What is your favourite animal?","Do you have a pet?","What is the weather like today?","What is your favourite season?","Do you like rainy days?","Is there a park near your home?","What makes you happy?"]
+];
 const SPK_TPL={
- a0:{n:'固定五问',use:'先敢开口，不怕说错',txt:
+ a0:{n:'每日五问',use:'每天换 5 个问题，先敢开口',txt:
 `你是我的英语口语陪练。我的英语水平是初级（小学四年级），词汇量约 500 词。
 
 请严格按照下面 5 个问题，一次问一个，等我回答完再问下一个：
 
-1. What is your name?
-2. How old are you?
-3. What is your favourite animal?
-4. Do you like English? Why?
-5. What do you do after school?
+{Q}
 
 规则：
 - 我回答后，先用英语自然地回应一句（比如 That is great! / Me too!），再问下一个问题
@@ -470,7 +474,7 @@ const SPK_RATE={1:'有点难 😅',2:'还可以 🙂',3:'说得顺 😃'};
 /* 今天该不该练口语、练哪套提示词（沿用《口语训练提示词》的阶段安排） */
 function speakPlan(k){
  k=k||today();const m=moduleOf(k);const wd=parse(k).getDay();
- if(m<=3){if(wd!==0&&wd!==6)return{on:false,tpl:'a0',min:10,why:'M1–M3 阶段：口语安排在周末，每周 1 次'};return{on:true,tpl:'a0',min:10,why:''};}
+ if(m<=3)return{on:true,tpl:'a0',min:10,why:'M1–M3 阶段：每天 1 次，每日五问轮换 10 分钟'};
  if(m>=16)return (wd===0||wd===6)?{on:true,tpl:'d',min:20,why:''}:{on:true,tpl:'a',min:10,why:''};
  if(wd===6)return{on:true,tpl:'b',min:25,why:''};
  if(wd===0)return{on:true,tpl:'c',min:25,why:''};
@@ -478,6 +482,12 @@ function speakPlan(k){
 }
 function speakText(tpl){
  let t=(SPK_TPL[tpl]||SPK_TPL.a).txt;
+ if(tpl==='a0'){
+  const ds=today().split('-').map(Number);
+  const dn=Math.floor(Date.UTC(ds[0],(ds[1]||1)-1,ds[2]||1)/86400000);
+  const qs=SPK_QBANK.map((g,i)=>(i+1)+'. '+g[(dn+i*2)%g.length]);
+  t=t.replace('{Q}',qs.join('\n'));
+ }
  if(tpl==='c'){
   const i=Math.abs(Math.floor(diffDays(fmt(anchor()),today())/7))%SPK_TOPICS.length;
   t=t.replace('【TOPIC】',SPK_TOPICS[i]);
@@ -1199,7 +1209,7 @@ function speakIntro(){
    '<div style="font-size:17px;font-weight:800;margin-top:6px">今天安排休息</div>'+
    '<div class="tiny muted" style="margin-top:6px">'+p.why+'</div>'+
    '<button class="btn block" style="margin-top:16px" data-act="spkBegin2">今天也想练（'+p.min+' 分钟）</button>'+
-   '<button class="btn o block" style="margin-top:8px" data-act="ovClose">听安排，周末再练</button></div>','',0);
+   '<button class="btn o block" style="margin-top:8px" data-act="ovClose">听安排，下次再练</button></div>','',0);
   return;
  }
  let h='<div class="wcard" style="text-align:center"><div style="font-size:34px">💬</div>'+
@@ -1221,11 +1231,15 @@ function speakTiming(){
  ov('⑤ 口语 · 进行中','','',0);
  clearInterval(ovTimer);
  ovTimer=setInterval(()=>{spk.secs=Math.round((Date.now()-spk.start)/1000);
-  const e=document.getElementById('spkTime');if(e)e.textContent=mmss(spk.secs);},500);
+  const e=document.getElementById('spkTime');if(e)e.textContent=mmss(spk.secs);
+  const g=document.getElementById('spkGoal');if(g)g.textContent=(spk.secs>=spk.min*60?
+   '✅ 今天 '+spk.min+' 分钟目标已达成，可以继续说，也可以打卡':
+   '还差 '+mmss(Math.max(0,spk.min*60-spk.secs))+' 到今天目标');},500);
  const tp=SPK_TPL[spk.tpl];
  let h='<div class="wcard" style="text-align:center"><div style="font-size:34px">🎙️</div>'+
   '<div id="spkTime" style="font-size:32px;font-weight:800;margin-top:6px">00:00</div>'+
-  '<div class="tiny muted" style="margin-top:4px">目标 '+spk.min+' 分钟 · '+tp.n+'</div></div>';
+  '<div class="tiny muted" style="margin-top:4px">目标 '+spk.min+' 分钟 · '+tp.n+'</div>'+
+  '<div id="spkGoal" class="tiny muted" style="margin-top:6px">还差 '+mmss(spk.min*60)+' 到今天目标</div></div>';
  h+='<div class="card" style="padding:12px 14px"><b>家长可以问一句</b>'+
   '<div class="tiny muted" style="margin-top:4px">「今天豆包夸你哪句说得好？」——让她复述一遍，比多说 5 分钟管用。</div></div>';
  h+='<button class="btn block" style="margin-top:14px" data-act="spkEnd">说完了，打卡 ✓</button>';
@@ -1333,32 +1347,37 @@ function wbStep(){
 /* =========================================================
    🎯 技能训练：KET 真题题型（阅读 Part1/2 · 写作 Part6/7 · 听力笔记填空）
    ========================================================= */
-const EX=window.EXAM||{read1:[],read2:[],write6:[],write7:[],list2:[]};
+const EX=window.EXAM||{read1:[],read2:[],write6:[],write7:[],list1:[],list2:[],list3:[]};
 let ex={type:'',set:null,i:0,ok:0,total:0,ans:[]};
 function skillRec(){
  const m=moduleOf(today());
  if(m>=4&&m<=8)return {k:'read',t:'本月是阅读季，先练阅读 Part 1 / Part 2'};
  if(m>=9&&m<=10)return {k:'write',t:'本月是写作季，先练写邮件和看图故事'};
- if(m===11)return {k:'listen',t:'本月是听力季，先练笔记填空'};
+ if(m===11)return {k:'listen',t:'本月是听力季，先练 Part 1 短对话'};
  if(m>=12)return {k:'read',t:'冲刺阶段，哪项弱就练哪项'};
- return {k:'any',t:'现在打基础阶段，想提前玩玩也可以'};
+ return {k:'any',t:'现在打基础阶段，先练语法小练，把底子打牢'};
 }
 function skillMenu(){
  const rec=skillRec().k;
  const items=[
+  {k:'paper',n:'模拟小考（整套卷）',d:'4 部分连做 · 计时出成绩单',icon:'🎓',n0:null},
+  {k:'grammar',n:'语法小练（带解析）',d:'50 题 · 10 个语法点 · 答完讲为什么',icon:'📐',n0:EX.grammar.length},
   {k:'read1',n:'阅读 Part 1 标识 / 短信',d:'6 题 · 看短文本选主旨',icon:'📕',n0:EX.read1.length},
   {k:'read2',n:'阅读 Part 2 三短文匹配',d:'7 题 · A / B / C 三选一',icon:'📗',n0:EX.read2.length},
   {k:'write6',n:'写作 Part 6 邮件 / 便条',d:'25 词 · 三个要点写全',icon:'✉️',n0:EX.write6.length},
   {k:'write7',n:'写作 Part 7 看图故事',d:'35 词 · 三幅图串成故事',icon:'🖼️',n0:EX.write7.length},
-  {k:'list2',n:'听力 Part 2 笔记填空',d:'5 空 · 抓数字、日期、价格',icon:'🎧',n0:EX.list2.length}
+  {k:'list1',n:'听力 Part 1 短对话选图',d:'5 题 · 听一段选一张图',icon:'🎧',n0:EX.list1.length},
+  {k:'list2',n:'听力 Part 2 笔记填空',d:'5 空 · 抓数字、日期、价格',icon:'🎧',n0:EX.list2.length},
+  {k:'list3',n:'听力 Part 3 长对话选答案',d:'5 题 · 听一段对话答 5 题',icon:'🎧',n0:EX.list3.length}
  ];
  let h='<div class="wcard" style="text-align:center"><div style="font-size:32px">🎯</div>'+
   '<div style="font-size:17px;font-weight:800;margin-top:4px">KET 真题题型训练</div>'+
   '<div class="tiny muted" style="margin-top:4px">'+skillRec().t+'</div></div>';
  h+='<div class="sec-t">选一项</div><div class="card" style="padding:12px 14px">';
  items.forEach(it=>{
-  const hot=(rec==='any'||(rec==='read'&&it.k.indexOf('read')===0)||(rec==='write'&&it.k.indexOf('write')===0)||(rec==='listen'&&it.k==='list2'));
-  h+='<div class="list-item"><div class="t"><b>'+it.icon+' '+it.n+'</b><span>'+it.d+' · 共 '+it.n0+' 套'+(hot?' · <b style="color:var(--peach-d)">推荐</b>':'')+'</span></div>'+
+  const hot=(it.k==='paper'||it.k==='grammar'||rec==='any'||(rec==='read'&&it.k.indexOf('read')===0)||(rec==='write'&&it.k.indexOf('write')===0)||(rec==='listen'&&it.k.indexOf('list')===0));
+  const cnt=it.n0==null?'':(' · 共 '+it.n0+' 套');
+  h+='<div class="list-item"><div class="t"><b>'+it.icon+' '+it.n+'</b><span>'+it.d+cnt+(hot?' · <b style="color:var(--peach-d)">推荐</b>':'')+'</span></div>'+
    '<button class="btn '+(hot?'':'o ')+'sm" data-act="skPick" data-k="'+it.k+'">开始</button></div>';
  });
  h+='</div>';
@@ -1369,12 +1388,24 @@ function skillMenu(){
 function exLog(type,score,n){if(!st.examLog)st.examLog={};const a=st.examLog[type]||(st.examLog[type]=[]);
  a.push({d:today(),s:score,n:n});if(a.length>60)a.shift();save();}
 function exStart(type){
+ if(type==='paper'){paperIntro();return;}
  ex={type:type,set:null,i:0,ok:0,total:0,ans:[]};
- const pool=({read1:EX.read1,read2:EX.read2,write6:EX.write6,write7:EX.write7,list2:EX.list2})[type]||[];
+ const pool=({grammar:EX.grammar,read1:EX.read1,read2:EX.read2,write6:EX.write6,write7:EX.write7,list1:EX.list1,list2:EX.list2,list3:EX.list3})[type]||[];
  if(!pool.length){toast('素材还没准备好');return;}
  const done=(st.examLog&&st.examLog[type]||[]).length;
  ex.set=pool[done%pool.length];
- ({read1:exR1,read2:exR2,write6:exW6,write7:exW7,list2:exL2})[type]();
+ ({grammar:exG,read1:exR1,read2:exR2,write6:exW6,write7:exW7,list1:exL1,list2:exL2,list3:exL3})[type]();
+}
+/* ---- 语法小练：答完给一句解析，再进下一题 ---- */
+function exG(){
+ const s=ex.set;
+ if(ex.i>=s.qs.length)return exResult(ex.ok,s.qs.length,'','错题把解析看一遍，下次就不会错了');
+ const q=s.qs[ex.i];
+ ov('📐 语法小练','','',6);
+ ovBodySet('<div class="tiny muted" style="text-align:center;margin-bottom:8px">第 '+(ex.i+1)+' / '+s.qs.length+' 题 · '+esc(s.title)+'</div>'+
+  '<div class="card" style="padding:14px"><div style="font-size:17px;line-height:1.8;font-weight:700">'+esc(q.q)+'</div></div>'+
+  '<div class="card">'+q.o.map((o,i)=>'<button class="opt" data-act="gPick" data-i="'+i+'">'+esc(o)+'</button>').join('')+'</div>'+
+  '<div id="gExp"></div>');
 }
 function exResult(score,total,title,tip){
  const pct=total?Math.round(score/total*100):0;
@@ -1467,6 +1498,60 @@ function writeSubmit(kind){
   '<button class="btn o block" style="margin-top:8px" data-act="ovClose">返回今日</button></div>');
  confetti(16);
 }
+/* ---- 听力 Part 1：短对话选图（emoji 当图片，逐题听） ---- */
+function lSay(t){say(String(t||'').replace(/\n/g,' '),0.82,{});}
+function exL1(){
+ const s=ex.set;
+ if(ex.i>=s.qs.length)return exResult(ex.ok,s.qs.length,'','听不懂就多听两遍，抓关键词');
+ const q=s.qs[ex.i];
+ ov('🎧 听力 · Part 1','','',5);
+ exL1Body(q);
+ setTimeout(()=>lSay(q.mono),400);
+}
+function exL1Body(q){
+ let h='<div class="tiny muted" style="text-align:center;margin-bottom:10px">第 '+(ex.i+1)+' / '+ex.set.qs.length+' 题 · 听一段，选一张图</div>';
+ h+='<div class="card" style="padding:12px 14px;text-align:center">'+
+  '<button class="btn o" data-act="l1Play">🔊 再听一遍</button></div>';
+ h+='<div class="card" style="padding:12px 14px"><div style="font-weight:700;margin-bottom:10px">'+esc(q.q)+'</div>'+
+  q.o.map((o,i)=>'<button class="opt l1opt" data-act="l1Pick" data-i="'+i+'" style="display:flex;align-items:center;gap:10px;text-align:left">'+
+   '<span style="font-size:22px">'+esc(o.split(/\s/)[0])+'</span><span>'+esc(o.replace(/^\S+\s/,''))+'</span></button>').join('')+'</div>';
+ ovBodySet(h);
+}
+/* ---- 听力 Part 3：长对话三选一（整段听一次，答 5 题） ---- */
+function exL3(){
+ const s=ex.set;
+ ov('🎧 听力 · Part 3','','',5);
+ let h='<div class="tiny muted" style="text-align:center;margin-bottom:10px">'+esc(s.title)+' · 听完整段对话，答 5 道题</div>';
+ h+='<div class="card" style="padding:12px 14px;text-align:center">'+
+  '<button class="btn o" data-act="l3Play">🔊 再听一遍整段对话</button>'+
+  '<div class="tiny muted" style="margin-top:8px">可以听两遍再答题</div></div>';
+ h+='<div class="card" style="padding:12px 14px">';
+ s.qs.forEach((q,i)=>{
+  h+='<div style="margin-bottom:14px"><div style="font-weight:700;font-size:14px;margin-bottom:6px">'+(i+1)+'. '+esc(q.q)+'</div>'+
+   q.o.map((o,j)=>'<button class="opt l3opt" data-act="l3Pick" data-q="'+i+'" data-i="'+j+'" style="display:block;width:100%;text-align:left;margin-top:5px">'+esc(o)+'</button>').join('')+'</div>';
+ });
+ h+='<button class="btn block" style="margin-top:6px" data-act="l3Check">对答案</button></div>';
+ ovBodySet(h);
+ ex.ans=new Array(s.qs.length).fill(-1);
+ setTimeout(()=>lSay(s.dialog),400);
+}
+function l3Check(){
+ const s=ex.set;let ok=0;const res=[];
+ s.qs.forEach((q,i)=>{
+  const a=ex.ans[i],good=(a===q.a);if(good)ok++;
+  res.push({q:q.q,right:q.o[q.a],pick:a>=0?q.o[a]:'（没选）',ok:good});
+ });
+ exLog('list3',Math.round(ok/s.qs.length*100),s.qs.length);
+ ovBodySet('<div class="wcard" style="text-align:center"><div style="font-size:38px">'+(ok===s.qs.length?'🎉':(ok>=3?'👍':'💪'))+'</div>'+
+  '<div style="font-size:22px;font-weight:900;margin-top:6px">'+ok+' / '+s.qs.length+'</div></div>'+
+  '<div class="card" style="padding:12px 14px">'+res.map(r=>'<div style="margin-bottom:10px;border-bottom:1px solid var(--line);padding-bottom:8px">'+
+   '<div style="font-size:13px;font-weight:700">'+esc(r.q)+'</div>'+
+   '<div class="tiny" style="margin-top:4px">正确答案：<span class="pill g">'+esc(r.right)+'</span></div>'+
+   (r.ok?'':'<div class="tiny muted" style="margin-top:3px">你选的：'+esc(r.pick)+'</div>')+'</div>').join('')+'</div>'+
+  '<button class="btn block" style="margin-top:12px" data-act="skill">再练一项</button>'+
+  '<button class="btn o block" style="margin-top:8px" data-act="l3Again">这套再听一次</button>');
+ save();confetti(ok>=3?24:10);
+}
 /* ---- 听力 Part 2 笔记填空 ---- */
 function exL2(){
  const s=ex.set;
@@ -1516,6 +1601,164 @@ function l2Check(){
 }
 
 /* =========================================================
+   🎓 模拟小考：整套卷（阅读 + 听力 + 写作，分项出成绩单）
+   独立于单题训练，不写各题型 examLog，只在最后记一条 paper 成绩
+   ========================================================= */
+const PAPER_SECS=[
+ {k:'read1',name:'阅读 Part 1',icon:'📕',tip:'看标识 / 短文本，选答案',need:6},
+ {k:'list1',name:'听力 Part 1',icon:'🎧',tip:'听一段短对话，选图片',need:5},
+ {k:'list3',name:'听力 Part 3',icon:'🎧',tip:'听一段长对话，答 5 题',need:5},
+ {k:'write6',name:'写作 Part 6',icon:'✉️',tip:'写一封 25 词以上的邮件',need:1}
+];
+function paperIntro(){
+ const done=(st.examLog&&st.examLog.paper||[]).length;
+ let h='<div class="wcard" style="text-align:center"><div style="font-size:32px">🎓</div>'+
+  '<div style="font-size:17px;font-weight:800;margin-top:4px">模拟小考 · 整套卷</div>'+
+  '<div class="tiny muted" style="margin-top:6px">像考试一样连做 4 部分，最后出一张成绩单</div></div>';
+ h+='<div class="card" style="padding:12px 14px">';
+ PAPER_SECS.forEach((s,i)=>{h+='<div class="list-item"><div class="t"><b>'+s.icon+' 第 '+(i+1)+' 部分 · '+s.name+'</b><span>'+s.tip+'</span></div></div>';});
+ h+='</div><div class="card" style="padding:12px 14px"><div class="tiny" style="line-height:1.9">'+
+  '· 客观题 16 道，按答对题数给分<br>· 写作不自动打分，家长端能看到写了什么<br>· 建议 20 分钟，可随时暂停<br>· 每次抽的题不一样（已考 '+(done?done+' 次':'0 次')+'）</div>'+
+  '<button class="btn block" style="margin-top:12px" data-act="paperStart">开始考试</button></div>';
+ ov('🎓 模拟小考',h,'',0);
+}
+function paperStart(){
+ ex.paper={idx:0,startTs:Date.now(),qIdx:0,
+  secs:PAPER_SECS.map(s=>({k:s.k,name:s.name,icon:s.icon,score:0,total:0,done:false,text:''}))};
+ paperSection();
+}
+function paperSection(){
+ const p=ex.paper;
+ if(!p||p.idx>=p.secs.length)return paperResult();
+ const sec=p.secs[p.idx],pool=EX[sec.k]||[];
+ if(!pool.length){p.idx++;return paperSection();}
+ const done=(st.examLog&&st.examLog.paper||[]).length;
+ ex.set=pool[done%pool.length];
+ ex.i=0;p.qIdx=0;
+ p.secs[p.idx].total=(sec.k==='write6')?1:ex.set.qs.length;
+ ({read1:paperR1,list1:paperL1,list3:paperL3,write6:paperW6})[sec.k]();
+}
+function paperHead(){
+ const p=ex.paper,sec=p.secs[p.idx],el=document.getElementById('ovRight');
+ if(el)el.innerHTML='第 '+(p.idx+1)+' / '+p.secs.length+' 部分';
+ return '<div class="tiny muted" style="text-align:center;margin-bottom:10px">'+sec.icon+' '+sec.name+' · '+
+  (sec.k==='write6'?'写好后交卷':('第 '+(p.qIdx+1)+' / '+sec.total+' 题'))+'</div>';
+}
+function paperR1(){
+ const q=ex.set.qs[ex.i],s=ex.paper.secs[ex.paper.idx];
+ ov(s.icon+' '+s.name,'','',6);
+ ovBodySet(paperHead()+
+  '<div class="card" style="padding:14px"><div style="background:#F6F4F1;border-radius:12px;padding:12px;font-size:15px;line-height:1.6;border-left:4px solid #E0A06A">'+esc(q.t)+'</div>'+
+  '<div style="font-weight:700;margin-top:12px">'+esc(q.q)+'</div></div>'+
+  '<div class="card">'+q.o.map((o,i)=>'<button class="opt" data-act="ppPick" data-i="'+i+'">'+esc(o)+'</button>').join('')+'</div>');
+}
+function paperL1(){
+ const q=ex.set.qs[ex.i],s=ex.paper.secs[ex.paper.idx];
+ ov(s.icon+' '+s.name,'','',5);
+ ovBodySet(paperHead()+
+  '<div class="card" style="padding:12px 14px;text-align:center"><button class="btn o" data-act="l1Play">🔊 再听一遍</button></div>'+
+  '<div class="card" style="padding:12px 14px"><div style="font-weight:700;margin-bottom:10px">'+esc(q.q)+'</div>'+
+   q.o.map((o,i)=>'<button class="opt l1opt" data-act="ppPick" data-i="'+i+'" style="display:flex;align-items:center;gap:10px;text-align:left">'+
+    '<span style="font-size:22px">'+esc(o.split(/\s/)[0])+'</span><span>'+esc(o.replace(/^\S+\s/,''))+'</span></button>').join('')+'</div>');
+ setTimeout(()=>lSay(q.mono),400);
+}
+function paperL3(){
+ const s=ex.set,sec=ex.paper.secs[ex.paper.idx];
+ ov(sec.icon+' '+sec.name,'','',5);
+ let h=paperHead()+
+  '<div class="card" style="padding:12px 14px;text-align:center"><button class="btn o" data-act="l3Play">🔊 再听一遍整段对话</button></div>'+
+  '<div class="card" style="padding:12px 14px">';
+ s.qs.forEach((q,i)=>{h+='<div style="margin-bottom:14px"><div style="font-weight:700;font-size:14px;margin-bottom:6px">'+(i+1)+'. '+esc(q.q)+'</div>'+
+   q.o.map((o,j)=>'<button class="opt p3opt" data-act="ppL3Pick" data-q="'+i+'" data-i="'+j+'" style="display:block;width:100%;text-align:left;margin-top:5px">'+esc(o)+'</button>').join('')+'</div>';});
+ h+='<button class="btn block" style="margin-top:6px" data-act="ppL3Check">这部分做完</button></div>';
+ ovBodySet(h);
+ ex.ans=new Array(s.qs.length).fill(-1);
+ setTimeout(()=>lSay(s.dialog),400);
+}
+function paperW6(){
+ const s=ex.set,sec=ex.paper.secs[ex.paper.idx];
+ ov(sec.icon+' '+sec.name,'','',8);
+ ovBodySet(paperHead()+
+  '<div class="card" style="padding:14px"><div class="tiny muted">写给：'+esc(s.to)+'</div>'+
+  '<div style="margin-top:6px;font-size:15px;line-height:1.6">'+esc(s.situation)+'</div></div>'+
+  '<div class="card" style="padding:12px 14px"><b>三个要点都要写到</b>'+
+   s.pts.map((p,i)=>'<div class="tiny" style="margin-top:6px">'+(i+1)+'. '+esc(p)+'</div>').join('')+'</div>'+
+  '<div class="card" style="padding:12px 14px"><textarea id="wIn" rows="6" placeholder="Hi ... ," style="width:100%;padding:12px;border:2px solid var(--line);border-radius:12px;font-size:15px;line-height:1.6"></textarea>'+
+   '<div class="tiny muted" id="wCount" style="margin-top:6px">0 词 · 需要 25 词以上</div>'+
+   '<button class="btn block" style="margin-top:10px" data-act="paperWrite">交卷</button></div>');
+ const ta=document.getElementById('wIn');
+ if(ta)ta.oninput=function(){const n=(ta.value||'').trim().split(/\s+/).filter(Boolean).length;
+  const e=document.getElementById('wCount');if(e){e.innerHTML=n+' 词 · '+(n>=25?'<b style="color:#3E8E5A">够了</b>':'还差 '+(25-n)+' 词');}};
+}
+function paperRenderCurrent(){
+ const p=ex.paper,k=p.secs[p.idx].k;
+ ({read1:paperR1,list1:paperL1,list3:paperL3,write6:paperW6})[k]();
+}
+function ppAdvance(add){
+ const p=ex.paper,sec=p.secs[p.idx];
+ sec.score+=add;sec.done=true;
+ p.idx++;ex.i=0;p.qIdx=0;
+ setTimeout(paperSection,650);
+}
+function ppPickEvent(el){
+ const q=ex.set.qs[ex.i],i=+el.dataset.i,ok=(i===q.a);
+ el.parentNode.querySelectorAll('.opt').forEach(x=>x.classList.remove('ok','bad'));
+ el.classList.add(ok?'ok':'bad');
+ if(!ok){const right=el.parentNode.querySelectorAll('.opt')[q.a];if(right)right.classList.add('ok');}
+ const p=ex.paper;p.secs[p.idx].score+=(ok?1:0);
+ ex.i++;
+ if(ex.i<ex.set.qs.length){p.qIdx=ex.i;setTimeout(paperRenderCurrent,650);}
+ else ppAdvance(0);   /* 分数已逐题累加，换部分时不再加 */
+}
+function ppL3CheckEvent(){
+ const s=ex.set;let ok=0;
+ s.qs.forEach((q,i)=>{if(ex.ans[i]===q.a)ok++;});
+ ppAdvance(ok);
+}
+function paperWriteEvent(){
+ const ta=document.getElementById('wIn'),t=(ta?ta.value||'':'').trim();
+ const n=t.split(/\s+/).filter(Boolean).length;
+ if(n<8){toast('再写长一点，至少 8 个词');return;}
+ const p=ex.paper;p.secs[p.idx].text=t;
+ p.secs[p.idx].score=n>=25?100:Math.round(n/25*100);
+ if(!st.writing)st.writing=[];
+ st.writing.push({d:today(),kind:'write6',tip:ex.set?ex.set.id:'paper',text:t,words:n});
+ if(st.writing.length>80)st.writing.shift();
+ if(!st.examLog)st.examLog={};
+ (st.examLog.paperWrite=st.examLog.paperWrite||[]).push({d:today(),n:n});
+ save();ppAdvance(0);
+}
+function paperResult(){
+ const p=ex.paper;
+ const secs=p.secs.filter(s=>s.total>0);
+ const objSecs=secs.filter(s=>s.k!=='write6');
+ const total=objSecs.reduce((a,s)=>a+s.total,0);
+ const score=objSecs.reduce((a,s)=>a+s.score,0);
+ const pct=total?Math.round(score/total*100):0;
+ const mins=Math.max(1,Math.round((Date.now()-p.startTs)/60000));
+ if(!st.examLog)st.examLog={};
+ (st.examLog.paper=st.examLog.paper||[]).push({d:today(),s:pct,n:total,min:mins});
+ save();
+ let h='<div class="wcard" style="text-align:center"><div style="font-size:44px">'+(pct>=85?'🏆':(pct>=70?'🌟':'💪'))+'</div>'+
+  '<div style="font-size:15px;margin-top:4px">本次小考成绩</div>'+
+  '<div style="font-size:30px;font-weight:900;margin-top:2px">'+pct+' 分</div>'+
+  '<div class="tiny muted" style="margin-top:4px">客观题答对 '+score+' / '+total+' · 用时约 '+mins+' 分钟</div></div>';
+ h+='<div class="card" style="padding:12px 14px"><b>分项成绩</b>';
+ secs.forEach(s=>{
+  const sc=s.k==='write6'?((s.score>=100?'字数达标':(s.score+'% 字数'))):(s.score+' / '+s.total);
+  h+='<div class="list-item"><div class="t"><b>'+s.icon+' '+s.name+'</b><span>'+sc+'</span></div></div>';
+ });
+ h+='</div><div class="card" style="padding:12px 14px"><div class="tiny" style="line-height:1.9">'+
+  (pct>=85?'很稳，可以开始练整套真题了。':(pct>=70?'基础不错，把错的那部分再练一轮。':'别急，回到错的那个板块多练几次，再来考。'))+
+  '<br>写作已保存，家长端「本周写作」能看到写了什么。</div></div>'+
+  '<button class="btn block" style="margin-top:12px" data-act="paperAgain">再考一套</button>'+
+  '<button class="btn o block" style="margin-top:8px" data-act="skill">返回技能训练</button>';
+ const tt=document.getElementById('ovTitle');if(tt)tt.textContent='🎓 小考成绩单';
+ const rr=document.getElementById('ovRight');if(rr)rr.textContent='';
+ ovBodySet(h);confetti(pct>=70?30:12);
+}
+
+/* =========================================================
    📊 本周周报 + 👦👧 多孩子档案 / PK 榜
    ========================================================= */
 function weekDigest(){
@@ -1533,8 +1776,10 @@ function weekDigest(){
  const lg=st.examLog||{};const trainN=Object.keys(lg).map(k=>lg[k].length).reduce((a,b)=>a+b,0);
  const avgR=rs.length?Math.round(rs.reduce((a,b)=>a+b,0)/rs.length):null;
  const wr=(st.writing||[]).filter(w=>days.indexOf(w.d)>=0);
+ const papers=(lg.paper||[]).filter(p=>days.indexOf(p.d)>=0);
  return {wk:wk,done:done,ot:ot,vOk:vOk,vT:vT,acc:vT?Math.round(vOk/vT*100):null,
   avgR:avgR,lOk:lOk,spD:spD,spMin:Math.round(spS/60),weak:weak,trainN:trainN,
+  papers:papers,
   wrongN:wrongList().length,wr:wr,stars:st.stars||0,streak:st.streak||0,
   kw:knownWords(),tw:totalWords()};
 }
@@ -1554,6 +1799,8 @@ function digestHTML(d){
  if(d.weak.length)h+='<div class="sec-t">最需要攻克的词</div><div class="card" style="padding:12px 14px">'+
   '<div style="display:flex;flex-wrap:wrap;gap:6px">'+d.weak.map(w=>'<span class="pill y">'+esc(w)+'</span>').join('')+'</div>'+
   '<div class="tiny muted" style="margin-top:8px">这些词已经在复习队列和错词本里，不用你手动整理。</div></div>';
+ if(d.papers.length)h+='<div class="sec-t">最近小考</div><div class="card" style="padding:12px 14px">'+
+  d.papers.slice(-5).reverse().map(p=>'<div class="spread" style="padding:6px 0"><span class="tiny muted">'+esc(p.d)+' · 客观题 '+p.n+' 道 · '+p.min+' 分钟</span><b style="color:'+(p.s>=70?'#3E8E5A':'#E0A06A')+'">'+p.s+' 分</b></div>').join('')+'</div>';
  if(d.wr.length)h+='<div class="sec-t">本周写作</div><div class="card" style="padding:12px 14px">'+
   d.wr.map(w=>'<div style="margin-bottom:10px"><span class="pill b">'+w.words+' 词</span>'+
    '<div style="font-size:14px;line-height:1.6;margin-top:4px">'+esc(w.text)+'</div></div>').join('')+'</div>';
@@ -2333,6 +2580,27 @@ document.addEventListener('click',function(e){
   /* 🎯 技能训练（KET 真题题型） */
   case 'skill':skillMenu();break;
   case 'skPick':exStart(a.dataset.k);break;
+  /* 🎓 模拟小考（整套卷） */
+  case 'paperStart':paperStart();break;
+  case 'ppPick':ppPickEvent(a);break;
+  case 'ppL3Pick':{
+   const qi=+a.dataset.q,i=+a.dataset.i;ex.ans[qi]=i;
+   a.parentNode.querySelectorAll('[data-act="ppL3Pick"][data-q="'+qi+'"]').forEach(x=>x.classList.remove('ok'));
+   a.classList.add('ok');break;}
+  case 'ppL3Check':ppL3CheckEvent();break;
+  case 'paperWrite':paperWriteEvent();break;
+  case 'paperAgain':{ex.paper=null;paperIntro();break;}
+  case 'gPick':{
+   const q=ex.set.qs[ex.i];const i=+a.dataset.i,ok=(i===q.a);ex.total++;if(ok)ex.ok++;
+   a.classList.add(ok?'ok':'bad');
+   if(!ok)a.parentNode.querySelectorAll('.opt').forEach(x=>{if(+x.dataset.i===q.a)x.classList.add('ok');});
+   const box=document.getElementById('gExp');
+   if(box)box.innerHTML='<div class="card" style="margin-top:10px;border-left:4px solid '+(ok?'#5BAE8E':'#E0A06A')+'">'+
+    '<b style="font-size:14px">'+(ok?'✅ 答对了':'📘 正确答案：'+esc(q.o[q.a]))+'</b>'+
+    '<div class="tiny" style="margin-top:6px;line-height:1.7">'+esc(q.ex)+'</div></div>'+
+    '<button class="btn block" style="margin-top:8px" data-act="gNext">'+(ex.i+1>=ex.set.qs.length?'看结果':'下一题')+'</button>';
+   break;}
+  case 'gNext':ex.i++;exG();break;
   case 'r1Pick':{
    const q=ex.set.qs[ex.i];const i=+a.dataset.i,ok=(i===q.a);ex.total++;if(ok)ex.ok++;
    a.classList.add(ok?'ok':'bad');
@@ -2344,9 +2612,25 @@ document.addEventListener('click',function(e){
    if(!ok)a.parentNode.querySelectorAll('.opt').forEach(x=>{if(+x.dataset.i===q.a)x.classList.add('ok');});
    setTimeout(()=>{ex.i++;exR2();},ok?520:1100);break;}
   case 'wSubmit':writeSubmit(a.dataset.k);break;
+  case 'l1Play':{lSay(ex.set.qs[ex.i].mono);break;}
+  case 'l1Pick':{
+   const q=ex.set.qs[ex.i],i=+a.dataset.i,ok=(i===q.a);ex.total++;if(ok)ex.ok++;
+   a.parentNode.querySelectorAll('.l1opt').forEach(x=>x.classList.remove('ok','bad'));
+   a.classList.add(ok?'ok':'bad');
+   if(!ok){const right=a.parentNode.querySelectorAll('.l1opt')[q.a];if(right)right.classList.add('ok');}
+   toast(ok?'✅ 答对了':'❌ 正确答案：'+q.o[q.a]);
+   setTimeout(()=>{ex.i++;exL1();},ok?700:1600);break;}
+  case 'l1Again':{ex.i=0;ex.ok=0;ex.total=0;exL1();break;}
   case 'l2Play':{say(ex.set.mono,0.8,{});break;}
   case 'l2Check':l2Check();break;
   case 'l2Again':{ex.i=0;ex.ok=0;ex.total=0;exL2();break;}
+  case 'l3Play':{lSay(ex.set.dialog);break;}
+  case 'l3Pick':{
+   const qi=+a.dataset.q,i=+a.dataset.i;ex.ans[qi]=i;
+   a.parentNode.querySelectorAll('[data-act="l3Pick"][data-q="'+qi+'"]').forEach(x=>x.classList.remove('ok'));
+   a.classList.add('ok');break;}
+  case 'l3Check':l3Check();break;
+  case 'l3Again':{ex.ok=0;ex.total=0;exL3();break;}
   case 'spkCopy':{
    const txt=speakText(spk.tpl);
    const done=()=>toast('提示词已复制，去豆包粘贴 📋');
