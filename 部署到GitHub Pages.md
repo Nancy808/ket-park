@@ -1,6 +1,6 @@
 # 英语萌宠乐园 · 部署到 GitHub Pages
 
-## ✅ 当前状态（2026-09-07 已推送）
+## ✅ 当前状态（2026-11-24 已推送 v1.15.1）
 
 | 项 | 值 |
 |---|---|
@@ -8,8 +8,12 @@
 | 分支 | `master` |
 | Pages 地址 | **https://nancy808.github.io/ket-park/** |
 | 推送方式 | 本机 SSH（~/.ssh/id_ed25519 已绑 GitHub），`git push -u origin master` |
+| 当前线上版本 | v1.15.1（模拟小考 / 听力 P1+P3 / 语法 / Sonia 发音） |
+| 最新提交 | `807dee6`（2026-11-24） |
 
-代码已全部推上去（含 80MB 音频）。**只需再开启一次 Pages**（见第三节，分支选 `master` 不是 `main`）。
+代码已全部推上去（含音频，已在线上复验 md5 与本地一致）。Pages 已开启，Source 为 `master` 分支 / 根目录。
+
+**两处部署地址**：GitHub Pages 是孩子打卡版；WorkBuddy 投稿/体验链接是 `https://nancy-ket-park.app.workbuddy.host/?sharecode=AO7VWCSG7E`。两域名数据各存各的，当前均为 v1.15.1。
 
 以后改了东西要更新：
 ```bash
