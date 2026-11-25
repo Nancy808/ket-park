@@ -323,7 +323,7 @@ const RANKS=[
 const DEF=()=>({v:1,ver:VERSION,name:'',start:START,stars:0,streak:0,best:0,lastDay:null,
  day:{},words:{},badges:{},msgs:{},diary:[],album:{},goal:'',level:null,levelLock:false,
  quiz:[],lotto:{chances:0,history:[]},rewards:[],pin:'1234',weekAward:{},speak:{streak:0,best:0,last:null,min:0},
- wrongBook:{},sents:[],examLog:{},writing:[],profiles:null,kid:null,
+ wrongBook:{},sents:[],examLog:{},writing:[],recAudio:[],profiles:null,kid:null,
  shields:{cards:2,leaveUntil:''},monthly:{},exam:[],ttsOK:null,created:new Date().toISOString(),
  voice:'maisie',wvoice:'gb',audio:true,pitch:1.25,voiceSet:0});
 let st=load();
@@ -390,7 +390,7 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.15.1';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.15.2';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
@@ -581,6 +581,25 @@ function speak(t,rate,cb){try{
  if(cb){u.onend=()=>cb(true);u.onerror=()=>cb(false);}
  speechSynthesis.speak(u);
 }catch(e){if(cb)cb(false);}}
+/* 单词专用回退发音：中性音高 + 优先标准英音女声。
+   不能用 speak()——它 pitch=1.25 是给短文童声设计的，会把单词拔高成尖细童声（二姐 11-25 反馈）。
+   朗读/听力继续用 speak()，此函数只服务单词，互不影响。 */
+function speakWordFallback(text,rate,cb){
+ try{
+  if(!window.speechSynthesis){if(cb)cb(false);return;}
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);
+  const en=(voices.length?voices:(window.speechSynthesis?speechSynthesis.getVoices():[])).filter(v=>/^en/i.test(v.lang));
+  const uk=en.filter(v=>/en-GB/i.test(v.lang));
+  const pref=/sonia|libby|kate|google uk english female|female/i;
+  const v=uk.find(x=>pref.test((x.name||'')+' '+(x.voiceURI||'')))||uk[0]||en[0]||null;
+  if(v)u.voice=v;
+  u.lang=(v&&v.lang)||'en-GB';
+  u.rate=rate||0.85;
+  u.pitch=1.0;   /* 关键：中性音高，不再拔高成童声 */
+  if(cb){u.onend=()=>cb(true);u.onerror=()=>cb(false);}
+  speechSynthesis.speak(u);
+ }catch(e){if(cb)cb(false);}}
 
 /* ---- 预录音频（edge-tts 微软神经网络音色，接近真人） ---- */
 const AUDIO_CACHE={},AUDIO_FAIL={};
@@ -621,7 +640,9 @@ function playWord(w,rate,cb){
   a.onerror=()=>{AUDIO_FAIL[key]=1;};
   a.currentTime=it[0];
   const p=a.play();
-  if(p&&p.catch)p.catch(()=>{AUDIO_FAIL[key]=1;speak(w,rate,cb);});
+  /* 自动播放被拒多为手势/时序问题，不是文件坏 —— 不要再永久标记失败，
+     否则该词之后全程走系统 TTS（尖细童声），且下次手势也救不回来。只本次回退，下次仍重试预录音。 */
+  if(p&&p.catch)p.catch(()=>{speakWordFallback(w,rate,cb);});
   clearTimeout(a._wt);
   a._wt=setTimeout(()=>{try{a.pause();}catch(e){}if(cb)cb(true);},(it[1]/(rate||1)+0.18)*1000);
   curAudio=a;
@@ -635,7 +656,7 @@ function say(text,rate,opt,cb){
  if(st.audio!==false&&opt.kind&&opt.key!=null){
   if(opt.kind==='word'){
    const r=rate||0.9;
-   loadWIdx(()=>{if(!playWord(String(opt.key).toLowerCase(),r,cb))speak(text,r,cb);});
+   loadWIdx(()=>{if(!playWord(String(opt.key).toLowerCase(),r,cb))speakWordFallback(text,r,cb);});
    return;
   }
   const url=readerURL(opt.key);
@@ -684,6 +705,33 @@ function stopRec(){return new Promise(res=>{if(!rec){res(null);return;}
   if(rec.stream)rec.stream.getTracks().forEach(t=>t.stop());
   recBlob=b;res(b);};rec.stop();});}
 function audioTag(b){if(!b)return '';try{return '<audio controls src="'+URL.createObjectURL(b)+'" style="width:100%;margin-top:10px"></audio>';}catch(e){return '';}}
+/* ---- 跟读录音持久化：blob -> dataURL 存 localStorage，家长端可回放 ----
+   容量约束：localStorage 通常 5~10MB，整篇录音 20~40s 约 100~300KB（base64 膨胀 33%）。
+   只保留最近 12 段，每段压到 64kbps 单声道，总量控制在 ~2MB 内，写入失败不阻断打卡。 */
+function saveReadRecorder(blob,meta){
+ if(!blob||!window.FileReader){toast('当前浏览器无法保存录音，跟读成绩仍会记录');return;}
+ try{
+  const fr=new FileReader();
+  fr.onload=()=>{
+   try{
+    if(!st.recAudio)st.recAudio=[];
+    st.recAudio.push({d:today(),rid:meta.rid||'',secs:meta.secs||0,score:meta.score!=null?meta.score:null,
+     kind:meta.kind||'full',data:fr.result});
+    /* 超限先按条数裁剪，再按估算容量裁剪（base64 字符数≈字节数） */
+    if(st.recAudio.length>12)st.recAudio=st.recAudio.slice(-12);
+    let bytes=st.recAudio.reduce((s,x)=>s+(x.data?x.data.length:0),0);
+    while(bytes>2*1024*1024&&st.recAudio.length>1){bytes-=st.recAudio[0].data.length;st.recAudio.shift();}
+    save();
+   }catch(e){toast('录音已保存本次，存储空间不足时旧录音会自动清理');}
+  };
+  fr.onerror=()=>toast('录音保存失败，跟读成绩仍会记录');
+  fr.readAsDataURL(blob);
+ }catch(e){toast('录音保存失败，跟读成绩仍会记录');}
+}
+function recAudioTag(x){
+ if(!x||!x.data)return '';
+ return '<audio controls preload="none" src="'+x.data+'" style="width:100%;margin-top:6px"></audio>';
+}
 /* 录音分析：时长 / 平均音量(dB) / 有声帧占比 —— 用于跟读评分 */
 function analyzeRec(blob){
  return new Promise(res=>{
@@ -1780,6 +1828,7 @@ function weekDigest(){
  return {wk:wk,done:done,ot:ot,vOk:vOk,vT:vT,acc:vT?Math.round(vOk/vT*100):null,
   avgR:avgR,lOk:lOk,spD:spD,spMin:Math.round(spS/60),weak:weak,trainN:trainN,
   papers:papers,
+  recs:(st.recAudio||[]).filter(x=>days.indexOf(x.d)>=0).slice(-12).reverse(),
   wrongN:wrongList().length,wr:wr,stars:st.stars||0,streak:st.streak||0,
   kw:knownWords(),tw:totalWords()};
 }
@@ -1804,6 +1853,11 @@ function digestHTML(d){
  if(d.wr.length)h+='<div class="sec-t">本周写作</div><div class="card" style="padding:12px 14px">'+
   d.wr.map(w=>'<div style="margin-bottom:10px"><span class="pill b">'+w.words+' 词</span>'+
    '<div style="font-size:14px;line-height:1.6;margin-top:4px">'+esc(w.text)+'</div></div>').join('')+'</div>';
+ if(d.recs.length)h+='<div class="sec-t">🎤 本周跟读录音（点听）</div><div class="card" style="padding:12px 14px">'+
+  '<div class="tiny muted" style="margin-bottom:8px">直接听孩子读了什么，不只是看分数。录音只存在本机，最近 12 段。</div>'+
+  d.recs.map(x=>'<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">'+
+   '<div class="spread"><span class="pill b">'+esc(x.d)+'</span><span class="tiny muted">'+
+   (x.secs||0)+' 秒'+(x.score!=null?' · '+x.score+' 分':'')+'</span></div>'+recAudioTag(x)+'</div>').join('')+'</div>';
  return h;
 }
 function showDigest(){const d=weekDigest();ov('📊 本周周报',digestHTML(d)+
@@ -1825,7 +1879,8 @@ function exportDigest(){
   '<div class="r"><span>技能训练</span><b>'+d.trainN+' 次</b></div>'+
   '<div class="r"><span>单词量</span><b>'+d.kw+' / '+d.tw+' 掌握</b></div>'+
   (d.weak.length?'<h2>最需要攻克的词</h2>'+d.weak.map(w=>'<span class="pill">'+esc(w)+'</span>').join(''):'')+
-  (d.wr.length?'<h2>本周写作</h2>'+d.wr.map(w=>'<p>'+esc(w.text)+'（'+w.words+' 词）</p>').join(''):'');
+  (d.wr.length?'<h2>本周写作</h2>'+d.wr.map(w=>'<p>'+esc(w.text)+'（'+w.words+' 词）</p>').join(''):'')+
+  (d.recs.length?'<h2>本周跟读录音</h2><p>共 '+d.recs.length+' 段（'+d.recs.map(x=>x.d).join('、')+'）。音频存在设备里，请在家长端周报里点听。</p>':'');
  const html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>周报 '+d.wk+'</title><style>'+css+'</style></head><body>'+body+'</body></html>';
  try{
   const w=window.open('','_blank');
@@ -2723,6 +2778,8 @@ document.addEventListener('click',function(e){
    if(!r0||r0.incomplete){toast('整篇还没读完，再读一遍吧');return;}
    finishTask('read',{score:r0.score,times:rd.times||1,dur:Math.round(r0.dur),
     stuck:r0.stuck?(r0.stuck.si+1)+'句:'+r0.stuck.word:''});
+   /* 保存本次跟读录音，家长端周报可回放（不影响成绩与解锁） */
+   if(rd.blob)saveReadRecorder(rd.blob,{rid:rd.r&&rd.r.id,secs:rd.secs,score:r0.score,kind:'full'});
    ovClose();setTimeout(()=>{confetti(24);toast('跟读完成 ✅ 解锁听力');},150);break;}
   /* 听力 */
   case 'lp1':say(todayReader().text,0.8,{kind:'reader',key:todayReader().id});break;
