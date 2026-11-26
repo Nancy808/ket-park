@@ -390,7 +390,7 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.15.3';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.15.4';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
@@ -654,7 +654,7 @@ function playWord(w,rate,cb){
     let moved=false;
     const go=()=>{if(moved)return;moved=true;clearTimeout(a._seekT);reallyPlay();};
     a.addEventListener('seeked',go,{once:true});
-    a._seekT=setTimeout(go,600);   /* seek 卡住也不能一直不发声 */
+    a._seekT=setTimeout(go,1800);  /* 慢网首词 seek 可能 >600ms；给足时间，否则会从头读 */
     a.currentTime=it[0];
    }catch(e){reallyPlay();}
   };
