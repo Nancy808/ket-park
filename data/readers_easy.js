@@ -25,7 +25,7 @@ window.READERS_EASY = [
     {q:'Who buys the apples?',o:['My father','My mother','My friend','My teacher'],a:1},
     {q:'When does the writer eat an apple?',o:['At night','In the morning','After dinner','At school'],a:1}]},
 {id:104,lv:1,title:'My School Bag',
- text:'This is my school bag.\nIt is blue and big.\nI put my books in it.\nI put my pencil box in it.\nI take it to school every day.\nI like my bag.',
+ text:'This is my school bag.\nIt is blue and big.\nI put my books in it.\nI put my pencil box in it.\nI take it to school every day.\nI like my blue bag.',
  cn:'这是我的书包，又大又蓝。我把书放进去，把铅笔盒放进去。我每天带它去学校。我喜欢我的书包。',
  q:[{q:'What colour is the bag?',o:['Red','Blue','Green','Black'],a:1},
     {q:'What is in the bag?',o:['Toys','Books and a pencil box','Food','A cat'],a:1},

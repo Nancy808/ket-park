@@ -390,7 +390,7 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.15.2';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.15.3';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
@@ -630,35 +630,69 @@ function loadWIdx(cb){
 function playWord(w,rate,cb){
  if(!WIDX||!WIDX[w])return false;
  const it=WIDX[w],key='w'+wordDir()+'m'+it[2];
+ const r=Math.max(0.5,Math.min(2,rate||1));
  try{
   let a=AUDIO_CACHE[key];
-  if(!a){a=new Audio('audio/words/'+wordDir()+'m'+it[2]+'.mp3');a.preload='auto';AUDIO_CACHE[key]=a;
-   a.addEventListener('error',()=>{AUDIO_FAIL[key]=1;});}
-  if(AUDIO_FAIL[key])return false;
+  if(!a){a=new Audio('audio/words/'+wordDir()+'m'+it[2]+'.mp3');a.preload='auto';a.volume=1;AUDIO_CACHE[key]=a;}
   if(curAudio&&curAudio!==a){try{curAudio.pause();}catch(e){}}
-  a.playbackRate=Math.max(0.5,Math.min(2,rate||1));
-  a.onerror=()=>{AUDIO_FAIL[key]=1;};
-  a.currentTime=it[0];
-  const p=a.play();
-  /* 自动播放被拒多为手势/时序问题，不是文件坏 —— 不要再永久标记失败，
-     否则该词之后全程走系统 TTS（尖细童声），且下次手势也救不回来。只本次回退，下次仍重试预录音。 */
-  if(p&&p.catch)p.catch(()=>{speakWordFallback(w,rate,cb);});
-  clearTimeout(a._wt);
-  a._wt=setTimeout(()=>{try{a.pause();}catch(e){}if(cb)cb(true);},(it[1]/(rate||1)+0.18)*1000);
-  curAudio=a;
+  clearTimeout(a._wt);clearTimeout(a._loadT);clearTimeout(a._seekT);
+  let finished=false;
+  const done=ok=>{if(finished)return;finished=true;if(cb)cb(ok);};
+  const reallyPlay=()=>{
+   try{
+    a.volume=1;a.playbackRate=r;
+    const p=a.play();
+    /* 自动播放被拒只本次回退，不永久封杀整月音频 */
+    if(p&&p.catch)p.catch(()=>{speakWordFallback(w,r,done);});
+    a._wt=setTimeout(()=>{try{a.pause();}catch(e){}done(true);},(it[1]/r+0.18)*1000);
+    curAudio=a;
+   }catch(e){speakWordFallback(w,r,done);}
+  };
+  const seekThenPlay=()=>{
+   try{
+    if(Math.abs(a.currentTime-it[0])<=0.03){reallyPlay();return;}
+    let moved=false;
+    const go=()=>{if(moved)return;moved=true;clearTimeout(a._seekT);reallyPlay();};
+    a.addEventListener('seeked',go,{once:true});
+    a._seekT=setTimeout(go,600);   /* seek 卡住也不能一直不发声 */
+    a.currentTime=it[0];
+   }catch(e){reallyPlay();}
+  };
+  /* 关键修复：旧版在 readyState=0 就写 currentTime，部分安卓浏览器会丢掉 seek，
+     结果读到相邻单词、词尾空白或完全不出声（二姐 11-25 反馈 bike/bin/big/belt）。
+     现在先等可 seek 状态，再等 seek 真正完成，最后才 play。 */
+  const waitReady=()=>{
+   let started=false;
+   const evs=['loadedmetadata','canplay','progress'];
+   const go=()=>{
+    if(started)return;
+    if(!a.seekable||!a.seekable.length)return;
+    started=true;clearTimeout(a._loadT);
+    evs.forEach(ev=>a.removeEventListener(ev,go));
+    seekThenPlay();
+   };
+   evs.forEach(ev=>a.addEventListener(ev,go));
+   a._loadT=setTimeout(()=>{if(started)return;started=true;seekThenPlay();},2500);
+   if(a.load)a.load();
+  };
+  waitReady();
   return true;
  }catch(e){return false;}
 }
 /* say(text, rate, {kind:'word'|'reader', key:...}, cb) */
 function say(text,rate,opt,cb){
  opt=opt||{};
- if(st.voice==='sys'){speak(text,rate,cb);return;}
- if(st.audio!==false&&opt.kind&&opt.key!=null){
-  if(opt.kind==='word'){
+ /* 单词发音独立：短文选“系统语音”或关掉预录音频，都不能把单词带回 pitch=1.25 的童声兜底。
+    11-25 排查：这两条旁路会让所有单词只剩一个系统童声，绕过了 st.wvoice。 */
+ if(opt.kind==='word'){
+  if(st.audio!==false){
    const r=rate||0.9;
    loadWIdx(()=>{if(!playWord(String(opt.key).toLowerCase(),r,cb))speakWordFallback(text,r,cb);});
-   return;
-  }
+  }else speakWordFallback(text,rate||0.9,cb);
+  return;
+ }
+ if(st.voice==='sys'){speak(text,rate,cb);return;}
+ if(st.audio!==false&&opt.kind&&opt.key!=null){
   const url=readerURL(opt.key);
   if(!AUDIO_FAIL[url]){playFile(url,rate||0.9,text,rate||0.9,cb);return;}
  }
