@@ -390,7 +390,7 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.15.4';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.15.5';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
@@ -666,13 +666,16 @@ function playWord(w,rate,cb){
    const evs=['loadedmetadata','canplay','progress'];
    const go=()=>{
     if(started)return;
-    if(!a.seekable||!a.seekable.length)return;
+    /* 有些服务 loadedmetadata 时 seekable 只有 [0,0]，此时设 currentTime 会被夹回 0。
+       必须等可 seek 范围覆盖目标词，否则首词会从头读。 */
+    if(!a.seekable||!a.seekable.length||!a.duration||!isFinite(a.duration))return;
+    if(a.seekable.end(a.seekable.length-1)<it[0]+it[1]+0.1)return;
     started=true;clearTimeout(a._loadT);
     evs.forEach(ev=>a.removeEventListener(ev,go));
     seekThenPlay();
    };
    evs.forEach(ev=>a.addEventListener(ev,go));
-   a._loadT=setTimeout(()=>{if(started)return;started=true;seekThenPlay();},2500);
+   a._loadT=setTimeout(()=>{if(started)return;started=true;seekThenPlay();},4000);
    if(a.load)a.load();
   };
   waitReady();
