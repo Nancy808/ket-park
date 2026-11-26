@@ -390,7 +390,7 @@ function todayReader(){const pool=readersOf(curLevel());if(!pool.length)return n
 function getDay(k){k=k||today();if(!st.day[k]||typeof st.day[k]!=='object')st.day[k]={tasks:{},newIds:[],doneAt:null,onTime:false};return st.day[k];}
 function isOnTime(){const d=new Date();const wd=d.getDay();const h=d.getHours(),mi=d.getMinutes();
  if(wd===0||wd===6)return h<18;return h<20||(h===20&&mi<=30);}
-const APP_VER='v1.15.5';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
+const APP_VER='v1.15.6';   /* 显示在家长端底部，用来确认平板跑的是不是最新版 */
 const TASKS=[['vocab','背词','10 分钟 · 新词+复习+听写','📖'],['read','跟读','10 分钟 · 听示范→录音','🎤'],
  ['listen','听力','5 分钟 · 盲听+2 题','🎧'],['diary','说+写','5 分钟 · 说一句写一句','✏️']];
 
@@ -604,6 +604,33 @@ function speakWordFallback(text,rate,cb){
 /* ---- 预录音频（edge-tts 微软神经网络音色，接近真人） ---- */
 const AUDIO_CACHE={},AUDIO_FAIL={};
 let curAudio=null;
+/* 有些托管环境不暴露 Range，HTMLAudioElement 无法按 currentTime 定位（seekable.end 恒为 0）。
+   这时用 Web Audio 整段解码 + 精确切片播放，绕开浏览器 seek。 */
+let AC=null,WABUF={},curBufSrc=null;
+function audioCtx(){
+ try{
+  if(!AC){const C=window.AudioContext||window.webkitAudioContext;if(!C)return null;AC=new C();}
+  if(AC.state==='suspended')AC.resume().catch(()=>{});
+  return AC;
+ }catch(e){return null;}
+}
+function playWordViaBuffer(url,start,dur,rate,cb){
+ const ctx=audioCtx();if(!ctx){if(cb)cb(false);return;}
+ let finished=false;const done=ok=>{if(finished)return;finished=true;if(cb)cb(ok);};
+ try{if(curBufSrc){curBufSrc.stop();curBufSrc=null;}if(curAudio)curAudio.pause();}catch(e){}
+ const begin=buf=>{
+  try{
+   const src=ctx.createBufferSource();src.buffer=buf;src.playbackRate.value=rate;src.connect(ctx.destination);
+   src.onended=()=>{if(curBufSrc===src)curBufSrc=null;done(true);};
+   curBufSrc=src;src.start(0,Math.max(0,start),Math.max(0.1,dur||1));
+   setTimeout(()=>{try{src.stop();}catch(e){}},((dur||1)/rate+0.2)*1000);
+  }catch(e){done(false);}
+ };
+ if(WABUF[url]){begin(WABUF[url]);return;}
+ fetch(url).then(r=>{if(!r.ok)throw new Error('fetch '+r.status);return r.arrayBuffer();})
+  .then(ab=>ctx.decodeAudioData(ab)).then(buf=>{WABUF[url]=buf;begin(buf);})
+  .catch(()=>done(false));
+}
 function aSlug(k){return String(k).toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');}
 function voiceDir(){return st.voice==='libby'?'libby':st.voice==='maisie'?'maisie':'ana';}
 function readerURL(id){return 'audio/readers/'+voiceDir()+'/r'+id+'.mp3';}
@@ -630,52 +657,60 @@ function loadWIdx(cb){
 function playWord(w,rate,cb){
  if(!WIDX||!WIDX[w])return false;
  const it=WIDX[w],key='w'+wordDir()+'m'+it[2];
+ const url='audio/words/'+wordDir()+'m'+it[2]+'.mp3',target=it[0];
  const r=Math.max(0.5,Math.min(2,rate||1));
  try{
   let a=AUDIO_CACHE[key];
-  if(!a){a=new Audio('audio/words/'+wordDir()+'m'+it[2]+'.mp3');a.preload='auto';a.volume=1;AUDIO_CACHE[key]=a;}
+  if(!a){a=new Audio(url);a.preload='auto';a.volume=1;AUDIO_CACHE[key]=a;}
   if(curAudio&&curAudio!==a){try{curAudio.pause();}catch(e){}}
   clearTimeout(a._wt);clearTimeout(a._loadT);clearTimeout(a._seekT);
-  let finished=false;
+  let finished=false,bufferUsed=false;
   const done=ok=>{if(finished)return;finished=true;if(cb)cb(ok);};
+  const useBuffer=()=>{
+   if(bufferUsed)return;bufferUsed=true;
+   clearTimeout(a._seekT);clearTimeout(a._loadT);clearTimeout(a._wt);
+   playWordViaBuffer(url,target,it[1],r,done);
+  };
   const reallyPlay=()=>{
+   if(bufferUsed)return;
+   /* seek 被夹回 0（托管端无 Range）时，改走 Web Audio 精确切片 */
+   if(Math.abs(a.currentTime-target)>0.05){useBuffer();return;}
    try{
     a.volume=1;a.playbackRate=r;
     const p=a.play();
-    /* 自动播放被拒只本次回退，不永久封杀整月音频 */
     if(p&&p.catch)p.catch(()=>{speakWordFallback(w,r,done);});
     a._wt=setTimeout(()=>{try{a.pause();}catch(e){}done(true);},(it[1]/r+0.18)*1000);
     curAudio=a;
    }catch(e){speakWordFallback(w,r,done);}
   };
   const seekThenPlay=()=>{
+   if(bufferUsed)return;
    try{
-    if(Math.abs(a.currentTime-it[0])<=0.03){reallyPlay();return;}
+    if(Math.abs(a.currentTime-target)<=0.03){reallyPlay();return;}
     let moved=false;
     const go=()=>{if(moved)return;moved=true;clearTimeout(a._seekT);reallyPlay();};
     a.addEventListener('seeked',go,{once:true});
-    a._seekT=setTimeout(go,1800);  /* 慢网首词 seek 可能 >600ms；给足时间，否则会从头读 */
-    a.currentTime=it[0];
-   }catch(e){reallyPlay();}
+    a._seekT=setTimeout(go,1800);
+    a.currentTime=target;
+   }catch(e){useBuffer();}
   };
-  /* 关键修复：旧版在 readyState=0 就写 currentTime，部分安卓浏览器会丢掉 seek，
-     结果读到相邻单词、词尾空白或完全不出声（二姐 11-25 反馈 bike/bin/big/belt）。
-     现在先等可 seek 状态，再等 seek 真正完成，最后才 play。 */
   const waitReady=()=>{
    let started=false;
    const evs=['loadedmetadata','canplay','progress'];
    const go=()=>{
-    if(started)return;
-    /* 有些服务 loadedmetadata 时 seekable 只有 [0,0]，此时设 currentTime 会被夹回 0。
-       必须等可 seek 范围覆盖目标词，否则首词会从头读。 */
+    if(started||bufferUsed)return;
     if(!a.seekable||!a.seekable.length||!a.duration||!isFinite(a.duration))return;
-    if(a.seekable.end(a.seekable.length-1)<it[0]+it[1]+0.1)return;
+    if(a.seekable.end(a.seekable.length-1)<target+it[1]+0.1){
+     /* 已完整加载仍不给 Range：浏览器 seek 不可用，直接 Web Audio 切片 */
+     if(a.readyState>=4){started=true;clearTimeout(a._loadT);evs.forEach(ev=>a.removeEventListener(ev,go));useBuffer();}
+     return;
+    }
     started=true;clearTimeout(a._loadT);
     evs.forEach(ev=>a.removeEventListener(ev,go));
     seekThenPlay();
    };
    evs.forEach(ev=>a.addEventListener(ev,go));
-   a._loadT=setTimeout(()=>{if(started)return;started=true;seekThenPlay();},4000);
+   a._loadT=setTimeout(()=>{if(started||bufferUsed)return;started=true;useBuffer();},4000);
    if(a.load)a.load();
   };
   waitReady();
@@ -718,6 +753,7 @@ function playFile(url,rate,ftxt,frate,cb){
  }catch(e){fail();}
 }
 function stopSay(){try{if(curAudio){curAudio.pause();curAudio.currentTime=0;}}catch(e){}
+ try{if(curBufSrc){curBufSrc.stop();curBufSrc=null;}}catch(e){}
  try{speechSynthesis.cancel();}catch(e){}}
 /* 预加载下一篇/下一词，减少等待 */
 function preload(opt){if(!opt||!opt.kind||opt.key==null)return;
